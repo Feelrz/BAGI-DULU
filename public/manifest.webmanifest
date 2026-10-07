@@ -1,0 +1,17 @@
+{
+  "name": "BAGI/ — Money, Before It Disappears",
+  "short_name": "BAGI/",
+  "description": "Bilingual local-first personal finance OS for splitting payday, tracking spending, chasing goals, and figuring out where the money went.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0b0b0b",
+  "theme_color": "#f4e44d",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
