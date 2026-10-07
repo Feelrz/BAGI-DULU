@@ -4,29 +4,32 @@
 
 > Personal finance for people who do not want their money app to feel like homework.
 
-## V4 highlights
+## V5 highlights
 
 - **Bahasa Indonesia + English** toggle from the top bar or Settings
 - **Roast Mode**: optional dry / Gen-Z copy that can be turned off when you want the app to behave
+- **Custom payday buckets**: fresh installs start empty; add, rename, lock, and delete buckets directly in Payday
+- **Upil Nabung** built-in starter preset with Dana Darurat, Goals, Nongkrong, and Impulsif
+- **Indonesian bank picker** with the current Bank Umum + Bank Umum Syariah names, while still allowing custom/BPR names
 - **Month Health Score** from budget usage, actual cashflow, savings rate, and emergency-fund progress
 - **Safe to spend / day** based on remaining monthly budget and days left
 - **Daily burn rate** and projected month-end spending
 - **No-spend day counter**
 - **Month-over-month expense delta**
 - **Transaction search + type filters**
-- Existing BAGI V2 local data automatically migrates to V4
+- Existing BAGI V2–V4 local data automatically migrates to V5
 
 ## Core features
 
 - Monthly control dashboard
 - Total balance across multiple accounts
-- Mandiri Utama default account + cash / e-wallet / savings / custom accounts
+- Generic Bank default account + cash / e-wallet / savings / custom accounts
 - Income, expense, and transfer ledger
 - Activity calendar + day filtering
 - Payday splitter with auto-balancing 100% sliders
 - Lock individual payday buckets while redistributing the rest
-- Multiple payday presets + payday history
-- Editable bucket labels
+- Empty-by-default payday setup + Upil Nabung starter preset + payday history
+- Add / rename / lock / delete payday buckets directly
 - Monthly budget caps per spending category
 - Warning and over-budget states
 - Emergency fund + unlimited custom goals
@@ -46,7 +49,7 @@
 
 ## Brand direction
 
-BAGI DULU is intentionally not written like a bank app.
+BAGI DULU is intentionally casual without turning every screen into a joke. Indonesian and English copy is short, conversational, and still clear when money is involved.
 
 Indonesian UI examples:
 
@@ -60,7 +63,11 @@ Indonesian UI examples:
 - **uangnya ke mana?**
 - **bulan ini masih aman?**
 
-English mode keeps the same dry tone instead of doing literal corporate translations.
+English mode keeps the same casual tone instead of doing literal corporate translations.
+
+## Bank list
+
+The built-in autocomplete includes the current Indonesian Bank Umum and Bank Umum Syariah names from the OJK June 2026 head-office directory. OJK publishes BPR/BPRS in separate directories, so the account field stays editable: any BPR/BPRS or custom account name can still be typed manually instead of being blocked by the preset list.
 
 ## Run locally
 

@@ -1,5 +1,17 @@
 # Changelog
 
+## 5.0.0
+- Fresh installs now start with no payday buckets.
+- Added the built-in **Upil Nabung** starter preset.
+- Payday buckets can now be added, renamed, locked, and deleted directly.
+- Reworked donut and payday history to support dynamic bucket structures.
+- Replaced Mandiri Utama default account with generic **Bank**.
+- Added the current OJK Bank Umum + Bank Umum Syariah names to bank autocomplete, plus manual BPR/BPRS/custom entry.
+- Cleaned up Indonesian and English copy to stay playful without forced slang.
+- Replaced unclear “future you” goal copy with clearer goal-progress language.
+- Added V4 → V5 local data migration and renamed the old default Mandiri account to Bank.
+- Bumped PWA shell cache to v5.
+
 ## 4.0.0
 - Removed slash branding and renamed visible product brand to BAGI DULU.
 - Fresh installs no longer ship with fake/demo money, budget, or goal numbers.

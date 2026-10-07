@@ -8,7 +8,7 @@ type Tab = "overview" | "payday" | "transactions" | "goals" | "recurring" | "ana
 type TxType = "income" | "expense" | "transfer";
 type AccountKind = "bank" | "cash" | "ewallet" | "savings";
 type GoalKind = "emergency" | "goal";
-type BucketId = "emergency" | "goals" | "hangout" | "impulse";
+type BucketId = string;
 
 type Account = {
   id: string;
@@ -74,11 +74,12 @@ type PaydayRun = {
   income: number;
   reserve: number;
   distributable: number;
-  buckets: Record<BucketId, number>;
+  buckets: Record<string, number>;
+  bucketNames?: Record<string, string>;
 };
 
 type AppState = {
-  version: 4;
+  version: 5;
   theme: Theme;
   language: Language;
   roastMode: boolean;
@@ -94,19 +95,138 @@ type AppState = {
   paydayHistory: PaydayRun[];
 };
 
-const STORAGE_KEY = "bagi-finance-os-v4";
-const LEGACY_STORAGE_KEYS = ["bagi-finance-os-v3", "bagi-finance-os-v2"];
+const STORAGE_KEY = "bagi-finance-os-v5";
+const LEGACY_STORAGE_KEYS = ["bagi-finance-os-v4", "bagi-finance-os-v3", "bagi-finance-os-v2"];
 const CLOUD_SESSION_KEY = "bagi-cloud-session-v1";
 
-const DEFAULT_BUCKETS: Bucket[] = [
-  { id: "emergency", name: "Dana Darurat", note: "safety net / buffer", percent: 40, locked: false },
-  { id: "goals", name: "Goals", note: "target, trip, gear, project", percent: 30, locked: false },
-  { id: "hangout", name: "Nongkrong", note: "social / hangout budget", percent: 15, locked: false },
-  { id: "impulse", name: "Impulsif", note: "boleh khilaf, tapi dibatasi", percent: 15, locked: false },
+const DEFAULT_BUCKETS: Bucket[] = [];
+
+const UPIL_NABUNG_BUCKETS: Bucket[] = [
+  { id: "emergency", name: "Dana Darurat", note: "buat yang benar-benar darurat", percent: 40, locked: false },
+  { id: "goals", name: "Goals", note: "buat hal yang lagi lo kejar", percent: 30, locked: false },
+  { id: "hangout", name: "Nongkrong", note: "keluar, makan, ngopi, ketemu orang", percent: 15, locked: false },
+  { id: "impulse", name: "Impulsif", note: "spontan boleh, asal masih ada jatahnya", percent: 15, locked: false },
 ];
 
+const PAYDAY_TEMPLATES = {
+  upil: {
+    label: "Upil Nabung",
+    captionId: "Starter pack: dana darurat, goals, nongkrong, impulsif.",
+    captionEn: "Starter split: emergency, goals, going out, impulse.",
+    buckets: UPIL_NABUNG_BUCKETS,
+  },
+} as const;
+
+const INDONESIAN_BANKS = [
+  "Bank Mandiri",
+  "Bank Negara Indonesia (BNI)",
+  "Bank Rakyat Indonesia (BRI)",
+  "Bank Tabungan Negara (BTN)",
+  "Bank Mandiri Taspen",
+  "Hibank",
+  "Bank Raya Indonesia",
+  "Bank BPD Bali",
+  "Bank BPD DIY",
+  "Bank Banten",
+  "Bank Bengkulu",
+  "Bank BJB",
+  "BSG (Bank SulutGo)",
+  "Bank Jakarta",
+  "Bank Jambi",
+  "Bank Jateng",
+  "Bank Jatim",
+  "Bank Kalbar",
+  "Bank Kalsel",
+  "Bank Kalteng",
+  "Bankaltimtara",
+  "Bank Lampung",
+  "Bank Maluku Malut",
+  "Bank Nagari",
+  "Bank NTT",
+  "Bank Papua",
+  "Bank Sulselbar",
+  "Bank Sulteng",
+  "Bank Sultra",
+  "Bank Sumsel Babel",
+  "Bank Sumut",
+  "Bank ANZ Indonesia",
+  "Bank Artha Graha Internasional",
+  "Bank BNP Paribas Indonesia",
+  "Bank Bumi Arta",
+  "Bank Capital Indonesia",
+  "Bank Central Asia (BCA)",
+  "China Construction Bank Indonesia",
+  "Bank CIMB Niaga",
+  "Bank CTBC Indonesia",
+  "Bank Danamon Indonesia",
+  "Bank DBS Indonesia",
+  "Bank Ganesha",
+  "Bank Hana Indonesia",
+  "Bank HSBC Indonesia",
+  "Bank IBK Indonesia",
+  "Bank ICBC Indonesia",
+  "Bank Ina Perdana",
+  "Bank Index Selindo",
+  "J Trust Bank",
+  "KB Bank",
+  "Bank Maspion",
+  "Bank Mayapada Internasional",
+  "Bank Maybank Indonesia",
+  "Bank Mega",
+  "Bank Mestika Dharma",
+  "Bank Mizuho Indonesia",
+  "Bank MNC Internasional",
+  "Bank Multiarta Sentosa",
+  "Nobu Bank",
+  "Bank OCBC Indonesia",
+  "Bank of India Indonesia",
+  "Panin Bank",
+  "Permata Bank",
+  "Bank QNB Indonesia",
+  "Bank Resona Perdania",
+  "Bank SBI Indonesia",
+  "Bank Shinhan Indonesia",
+  "Bank Sinarmas",
+  "Bank SMBC Indonesia",
+  "Bank UOB Indonesia",
+  "Bank Victoria International",
+  "Bank Woori Saudara",
+  "Allo Bank",
+  "Amar Bank",
+  "Bank Digital BCA (blu)",
+  "Bank Jago",
+  "Krom Bank",
+  "Bank Neo Commerce",
+  "Bank Oke Indonesia",
+  "Bank Sahabat Sampoerna",
+  "Bank Saqu",
+  "SeaBank",
+  "Superbank",
+  "Bank of America, N.A. Indonesia",
+  "Bank of China Indonesia",
+  "Citibank, N.A. Indonesia",
+  "Deutsche Bank AG Indonesia",
+  "JPMorgan Chase Bank, N.A. Indonesia",
+  "MUFG Bank Indonesia",
+  "Standard Chartered Bank Indonesia",
+  "Bank Syariah Indonesia (BSI)",
+  "Bank Syariah Nasional (BSN)",
+  "Bank Aceh Syariah",
+  "Bank BJB Syariah",
+  "BRK Syariah",
+  "Bank NTB Syariah",
+  "Bank Aladin Syariah",
+  "Bank BCA Syariah",
+  "Bank BTPN Syariah",
+  "KB Bank Syariah",
+  "Bank Mega Syariah",
+  "Bank Muamalat Indonesia",
+  "Bank Nano Syariah",
+  "Panin Dubai Syariah Bank",
+].sort((a, b) => a.localeCompare(b, "id"));
+
 const DEFAULT_ACCOUNTS: Account[] = [
-  { id: "mandiri-main", name: "Mandiri Utama", kind: "bank", openingBalance: 0, archived: false },
+  { id: "bank-main", name: "Bank", kind: "bank", openingBalance: 0, archived: false },
   { id: "cash", name: "Cash", kind: "cash", openingBalance: 0, archived: false },
   { id: "ewallet", name: "E-Wallet", kind: "ewallet", openingBalance: 0, archived: false },
 ];
@@ -125,13 +245,6 @@ const DEFAULT_GOALS: Goal[] = [
   { id: "emergency-fund", name: "Dana Darurat", kind: "emergency", current: 0, target: 0, monthlyContribution: 0, targetDate: "", priority: "high" },
 ];
 
-const PRESETS: Record<string, { label: string; caption: string; values: Record<BucketId, number> }> = {
-  balanced: { label: "Balanced", caption: "Aman tapi tetap hidup.", values: { emergency: 40, goals: 30, hangout: 15, impulse: 15 } },
-  safety: { label: "Safety First", caption: "Ngebut bikin safety net.", values: { emergency: 55, goals: 25, hangout: 10, impulse: 10 } },
-  goals: { label: "Goal Hunter", caption: "Target besar didahulukan.", values: { emergency: 25, goals: 50, hangout: 15, impulse: 10 } },
-  strict: { label: "No Nonsense", caption: "Lifestyle ditekan sementara.", values: { emergency: 60, goals: 35, hangout: 5, impulse: 0 } },
-};
-
 function uid(prefix = "id") {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -145,21 +258,44 @@ function bi(language: Language, id: string, en: string) {
 }
 
 function bucketDisplayName(bucket: Bucket, language: Language) {
-  if (language === "id") return bucket.name;
-  const defaults: Record<BucketId, string> = { emergency: "Dana Darurat", goals: "Goals", hangout: "Nongkrong", impulse: "Impulsif" };
-  const english: Record<BucketId, string> = { emergency: "Do Not Touch", goals: "Goals", hangout: "Going Out", impulse: "Allowed Bad Decisions" };
-  return bucket.name === defaults[bucket.id] ? english[bucket.id] : bucket.name;
+  const defaults: Record<string, string> = { emergency: "Dana Darurat", goals: "Goals", hangout: "Nongkrong", impulse: "Impulsif" };
+  const english: Record<string, string> = { emergency: "Emergency Fund", goals: "Goals", hangout: "Going Out", impulse: "Impulse" };
+  if (language === "en" && defaults[bucket.id] && bucket.name === defaults[bucket.id]) return english[bucket.id];
+  return bucket.name;
 }
 
 function bucketDisplayNote(bucket: Bucket, language: Language) {
-  if (language === "id") return bucket.note;
-  const notes: Record<BucketId, string> = {
-    emergency: "emergency money. discounts do not count.",
-    goals: "trip, gear, projects, future-you stuff.",
-    hangout: "friends, coffee, and leaving the house.",
-    impulse: "fun money with adult supervision.",
+  const known: Record<string, [string, string]> = {
+    emergency: ["buat yang benar-benar darurat.", "for actual emergencies."],
+    goals: ["buat hal yang lagi lo kejar.", "for something you're working toward."],
+    hangout: ["keluar, makan, ngopi, ketemu orang.", "going out, food, coffee, seeing people."],
+    impulse: ["spontan boleh, asal masih ada jatahnya.", "spontaneous is fine when it has a budget."],
   };
-  return notes[bucket.id];
+  return known[bucket.id] ? bi(language, known[bucket.id][0], known[bucket.id][1]) : bucket.note;
+}
+
+function normalizeBuckets(source: Bucket[]) {
+  if (!source.length) return [] as Bucket[];
+  const cleaned = source.slice(0, 12).map((item, index) => ({
+    id: String(item.id || uid("bucket")).slice(0, 64) || `bucket-${index + 1}`,
+    name: String(item.name || `Jatah ${index + 1}`).slice(0, 32),
+    note: String(item.note || "").slice(0, 80),
+    percent: clamp(Math.round(Number(item.percent) || 0), 0, 100),
+    locked: Boolean(item.locked),
+  }));
+  const unique: Bucket[] = [];
+  const seen = new Set<string>();
+  for (const item of cleaned) {
+    let id = item.id;
+    while (seen.has(id)) id = `${item.id}-${unique.length + 1}`;
+    seen.add(id);
+    unique.push({ ...item, id });
+  }
+  const sum = unique.reduce((total, item) => total + item.percent, 0);
+  if (sum === 100) return unique;
+  const weights = unique.map((item) => ({ ...item, percent: item.percent || 1 }));
+  const distributed = distributeInteger(100, weights);
+  return unique.map((item, index) => ({ ...item, percent: distributed[index] }));
 }
 
 function money(value: number, language: Language = "id") {
@@ -210,7 +346,7 @@ function distributeInteger(total: number, source: Bucket[]) {
 
 function baseState(): AppState {
   return {
-    version: 4,
+    version: 5,
     theme: "dark",
     language: "id",
     roastMode: true,
@@ -230,23 +366,10 @@ function baseState(): AppState {
 function normalizeState(input: Partial<AppState>): AppState | null {
   try {
     const defaults = baseState();
-    const buckets = Array.isArray(input.buckets) ? input.buckets : defaults.buckets;
-    const ids: BucketId[] = ["emergency", "goals", "hangout", "impulse"];
-    if (!ids.every((id) => buckets.some((bucket) => bucket.id === id))) return null;
-    const cleanedBuckets = ids.map((id) => {
-      const item = buckets.find((bucket) => bucket.id === id)!;
-      const fallback = defaults.buckets.find((bucket) => bucket.id === id)!;
-      return {
-        id,
-        name: String(item.name || fallback.name).slice(0, 32),
-        note: String(item.note || fallback.note).slice(0, 80),
-        percent: clamp(Math.round(Number(item.percent) || 0), 0, 100),
-        locked: Boolean(item.locked),
-      };
-    });
-    if (cleanedBuckets.reduce((sum, item) => sum + item.percent, 0) !== 100) return null;
+    const rawBuckets = Array.isArray(input.buckets) ? input.buckets as Bucket[] : defaults.buckets;
+    const cleanedBuckets = normalizeBuckets(rawBuckets);
 
-    const accounts = Array.isArray(input.accounts) && input.accounts.length ? input.accounts.map((a) => ({
+    let accounts = Array.isArray(input.accounts) && input.accounts.length ? input.accounts.map((a) => ({
       id: String(a.id || uid("acc")),
       name: String(a.name || "Account").slice(0, 40),
       kind: (["bank", "cash", "ewallet", "savings"].includes(a.kind) ? a.kind : "bank") as AccountKind,
@@ -260,6 +383,11 @@ function normalizeState(input: Partial<AppState>): AppState | null {
       monthlyLimit: Math.max(0, Number(c.monthlyLimit) || 0),
       archived: Boolean(c.archived),
     })) : defaults.categories;
+
+    const inputVersion = Number(input.version || 0);
+    if (inputVersion < 5) {
+      accounts = accounts.map((account) => account.id === "mandiri-main" && account.name === "Mandiri Utama" ? { ...account, name: "Bank" } : account);
+    }
 
     const transactions = Array.isArray(input.transactions) ? input.transactions.map((t) => ({
       id: String(t.id || uid("tx")),
@@ -297,7 +425,6 @@ function normalizeState(input: Partial<AppState>): AppState | null {
     })) : defaults.goals;
 
     const paydayHistory = Array.isArray(input.paydayHistory) ? input.paydayHistory.slice(0, 80) as PaydayRun[] : [];
-    const inputVersion = Number(input.version || 0);
     const legacyLooksUntouched = inputVersion < 4
       && transactions.length === 0
       && recurring.length === 0
@@ -335,7 +462,7 @@ function normalizeState(input: Partial<AppState>): AppState | null {
     normalizedReserve = normalizedMonthlyIncome > 0 ? Math.min(normalizedReserve, normalizedMonthlyIncome) : 0;
 
     return {
-      version: 4,
+      version: 5,
       theme: input.theme === "light" ? "light" : "dark",
       language: input.language === "en" ? "en" : "id",
       roastMode: input.roastMode !== false,
@@ -380,7 +507,7 @@ export default function MoneyApp() {
   const importRef = useRef<HTMLInputElement>(null);
 
   const currentAppState = useMemo<AppState>(() => ({
-    version: 4, theme, language, roastMode, selectedMonth, monthlyIncome, essentialReserve, buckets, accounts, categories, transactions, recurring, goals, paydayHistory,
+    version: 5, theme, language, roastMode, selectedMonth, monthlyIncome, essentialReserve, buckets, accounts, categories, transactions, recurring, goals, paydayHistory,
   }), [theme, language, roastMode, selectedMonth, monthlyIncome, essentialReserve, buckets, accounts, categories, transactions, recurring, goals, paydayHistory]);
 
   useEffect(() => {
@@ -484,9 +611,9 @@ export default function MoneyApp() {
   }, [monthTransactions]);
 
   const distributable = Math.max(0, monthlyIncome - essentialReserve);
-  const allocation = useMemo(() => Object.fromEntries(buckets.map((b) => [b.id, (distributable * b.percent) / 100])) as Record<BucketId, number>, [buckets, distributable]);
-  const plannedSavings = allocation.emergency + allocation.goals;
-  const plannedFun = allocation.hangout + allocation.impulse;
+  const allocation = useMemo(() => Object.fromEntries(buckets.map((b) => [b.id, (distributable * b.percent) / 100])) as Record<string, number>, [buckets, distributable]);
+  const allocationPercent = buckets.reduce((sum, bucket) => sum + bucket.percent, 0);
+  const allocatedAmount = buckets.reduce((sum, bucket) => sum + (allocation[bucket.id] || 0), 0);
   const budgetTotal = activeCategories.reduce((sum, c) => sum + c.monthlyLimit, 0);
   const spentAgainstBudget = activeCategories.reduce((sum, c) => sum + (categorySpend[c.id] || 0), 0);
   const budgetUsage = budgetTotal > 0 ? (spentAgainstBudget / budgetTotal) * 100 : 0;
@@ -551,20 +678,20 @@ export default function MoneyApp() {
 
   const monthMood = useMemo(() => {
     if (!monthTransactions.length) return {
-      title: bi(language, "masih bersih.", "fresh start."),
-      copy: bi(language, roastMode ? "Belum ada transaksi. Entah disiplin, entah baru buka aplikasi." : "Belum ada transaksi bulan ini.", roastMode ? "No transactions yet. Either disciplined or you just opened the app." : "No transactions this month yet."),
+      title: bi(language, "belum ada gerakan.", "nothing moved yet."),
+      copy: bi(language, roastMode ? "Masih kosong. Bagus, tapi kita juga belum punya bahan buat nilai bulan ini." : "Belum ada transaksi bulan ini.", roastMode ? "Still empty. Nice, but there is not enough data to judge the month yet." : "No transactions this month yet."),
     };
     if (budgetUsage > 110 || totals.net < 0) return {
-      title: bi(language, "agak gawat.", "a little cooked."),
-      copy: bi(language, roastMode ? "Angkanya mulai ngasih side-eye. Cek pengeluaran sebelum saldo ikut menghilang." : "Pengeluaran perlu dicek lagi bulan ini.", roastMode ? "The numbers are giving side-eye. Check spending before the balance disappears too." : "Spending needs another look this month."),
+      title: bi(language, "mulai berat.", "getting rough."),
+      copy: bi(language, roastMode ? "Pengeluaran udah keluar jalur. Cek yang paling besar dulu, nggak usah panik." : "Pengeluaran perlu dicek lagi bulan ini.", roastMode ? "Spending is off track. Start with the biggest one; no need to panic." : "Spending needs another look this month."),
     };
     if (budgetUsage >= 80) return {
       title: bi(language, "mulai tipis.", "getting tight."),
-      copy: bi(language, roastMode ? "Masih aman, tapi jangan tiba-tiba merasa kaya di minggu terakhir." : "Budget mulai mendekati batas.", roastMode ? "Still okay. Just don't suddenly feel rich in the final week." : "Budget is getting close to its limit."),
+      copy: bi(language, roastMode ? "Masih bisa aman kalau sisa bulan nggak ikut gas." : "Budget mulai mendekati batas.", roastMode ? "Still manageable if the rest of the month stays chill." : "Budget is getting close to its limit."),
     };
     return {
-      title: bi(language, "masih aman.", "still good."),
-      copy: bi(language, roastMode ? "Uang masih punya tujuan. Rare sight, enjoy it." : "Cashflow dan budget masih dalam jalur.", roastMode ? "Your money still has a plan. Rare sight, enjoy it." : "Cashflow and budget are still on track."),
+      title: bi(language, "aman sejauh ini.", "good so far."),
+      copy: bi(language, roastMode ? "Nggak perlu sok hemat. Cukup jangan lepas kontrol." : "Cashflow dan budget masih dalam jalur.", roastMode ? "No need to overdo it. Just keep the plan." : "Cashflow and budget are still on track."),
     };
   }, [budgetUsage, language, monthTransactions.length, roastMode, totals.net]);
 
@@ -611,22 +738,26 @@ export default function MoneyApp() {
     }
     const date = selectedMonth === monthKey() ? todayKey() : `${selectedMonth}-01`;
     setTransactions((current) => [{ id: uid("tx"), date, type: "income", amount: monthlyIncome, accountId: paydayAccountId, note: marker }, ...current]);
-    const run: PaydayRun = {
-      id: uid("payday"),
-      createdAt: new Date().toISOString(),
-      income: monthlyIncome,
-      reserve: essentialReserve,
-      distributable,
-      buckets: Object.fromEntries(buckets.map((bucket) => [bucket.id, bucket.percent])) as Record<BucketId, number>,
-    };
-    setPaydayHistory((current) => [run, ...current].slice(0, 80));
-    flash(bi(language, "Gajian masuk saldo + pembagian disimpan.", "Payday added to balance + split saved."));
+    if (buckets.length) {
+      const run: PaydayRun = {
+        id: uid("payday"),
+        createdAt: new Date().toISOString(),
+        income: monthlyIncome,
+        reserve: essentialReserve,
+        distributable,
+        buckets: Object.fromEntries(buckets.map((bucket) => [bucket.id, bucket.percent])) as Record<string, number>,
+        bucketNames: Object.fromEntries(buckets.map((bucket) => [bucket.id, bucketDisplayName(bucket, language)])) as Record<string, string>,
+      };
+      setPaydayHistory((current) => [run, ...current].slice(0, 80));
+    }
+    flash(bi(language, buckets.length ? "Gajian masuk saldo + pembagian disimpan." : "Gajian masuk saldo.", buckets.length ? "Payday added to balance + split saved." : "Payday added to balance."));
   }
 
   function changePercent(id: BucketId, requested: number) {
     setBuckets((current) => {
       const changed = current.find((item) => item.id === id);
       if (!changed || changed.locked) return current;
+      if (current.length === 1) return current.map((item) => ({ ...item, percent: 100 }));
       const lockedOthers = current.filter((item) => item.id !== id && item.locked);
       const adjustableOthers = current.filter((item) => item.id !== id && !item.locked);
       const lockedTotal = lockedOthers.reduce((sum, item) => sum + item.percent, 0);
@@ -643,20 +774,45 @@ export default function MoneyApp() {
     });
   }
 
-  function applyPreset(key: keyof typeof PRESETS) {
-    const preset = PRESETS[key];
-    setBuckets((current) => current.map((bucket) => ({ ...bucket, percent: preset.values[bucket.id], locked: false })));
-    flash(bi(language, `${preset.label} dipakai`, `${preset.label} applied`));
+  function applyTemplate(key: keyof typeof PAYDAY_TEMPLATES) {
+    const template = PAYDAY_TEMPLATES[key];
+    setBuckets(template.buckets.map((bucket) => ({ ...bucket, locked: false })));
+    flash(bi(language, `${template.label} dipakai.`, `${template.label} applied.`));
   }
 
+  function addBucket() {
+    setBuckets((current) => {
+      const fresh: Bucket = { id: uid("bucket"), name: bi(language, "Jatah Baru", "New Bucket"), note: bi(language, "ganti nama, terus kasih porsinya", "rename it, then give it a share"), percent: current.length ? 10 : 100, locked: false };
+      if (!current.length) return [fresh];
+      const resized = normalizeBuckets(current.map((item) => ({ ...item, locked: false, percent: Math.max(1, item.percent) })).concat(fresh));
+      return resized;
+    });
+    flash(bi(language, "Jatah baru ditambah.", "New bucket added."));
+  }
+
+  function removeBucket(id: string) {
+    setBuckets((current) => normalizeBuckets(current.filter((item) => item.id !== id).map((item) => ({ ...item, locked: false }))));
+  }
+
+  function clearBuckets() {
+    setBuckets([]);
+    flash(bi(language, "Pembagian dikosongin.", "Split cleared."));
+  }
+
+
   function commitPayday() {
+    if (!buckets.length) {
+      flash(bi(language, "Tambah jatah dulu sebelum simpan rencana.", "Add at least one bucket before saving the plan."));
+      return;
+    }
     const run: PaydayRun = {
       id: uid("payday"),
       createdAt: new Date().toISOString(),
       income: monthlyIncome,
       reserve: essentialReserve,
       distributable,
-      buckets: Object.fromEntries(buckets.map((bucket) => [bucket.id, bucket.percent])) as Record<BucketId, number>,
+      buckets: Object.fromEntries(buckets.map((bucket) => [bucket.id, bucket.percent])) as Record<string, number>,
+      bucketNames: Object.fromEntries(buckets.map((bucket) => [bucket.id, bucketDisplayName(bucket, language)])) as Record<string, string>,
     };
     setPaydayHistory((current) => [run, ...current].slice(0, 80));
     flash(bi(language, "Pembagian gajian disimpan", "Payday split saved"));
@@ -764,9 +920,17 @@ export default function MoneyApp() {
     flash(bi(language, "BAGI balik ke nol", "BAGI reset complete"));
   }
 
-  const donutStyle = {
-    background: `conic-gradient(var(--c1) 0 ${buckets[0].percent}%, var(--c2) ${buckets[0].percent}% ${buckets[0].percent + buckets[1].percent}%, var(--c3) ${buckets[0].percent + buckets[1].percent}% ${buckets[0].percent + buckets[1].percent + buckets[2].percent}%, var(--c4) ${buckets[0].percent + buckets[1].percent + buckets[2].percent}% 100%)`,
-  } as React.CSSProperties;
+  const donutStyle = useMemo(() => {
+    if (!buckets.length) return { background: "var(--surface-3)" } as React.CSSProperties;
+    const colors = ["var(--c1)", "var(--c2)", "var(--c3)", "var(--c4)"];
+    let cursor = 0;
+    const stops = buckets.map((bucket, index) => {
+      const start = cursor;
+      cursor += bucket.percent;
+      return `${colors[index % colors.length]} ${start}% ${cursor}%`;
+    });
+    return { background: `conic-gradient(${stops.join(", ")})` } as React.CSSProperties;
+  }, [buckets]);
 
   const navigation: Array<{ id: Tab; label: string }> = [
     { id: "overview", label: "Overview" },
@@ -784,7 +948,7 @@ export default function MoneyApp() {
       <header className="topbar">
         <button className="brand brand-button" type="button" onClick={() => setTab("overview")} aria-label="BAGI overview">
           <span className="brand-mark">B</span>
-          <span><strong>BAGI DULU</strong><small>{bi(language, "uang lo, tapi lebih niat", "money, but with a plan")}</small></span>
+          <span><strong>BAGI DULU</strong><small>{bi(language, "duit lo, lebih kebaca", "your money, less mysterious")}</small></span>
         </button>
         <div className="top-month">
           <button type="button" onClick={() => setSelectedMonth(shiftMonth(selectedMonth, -1))} aria-label={bi(language, "Bulan sebelumnya", "Previous month")}>←</button>
@@ -817,7 +981,7 @@ export default function MoneyApp() {
               <span className="eyebrow">BAGI DULU · MONTH CHECK</span>
               <h1>{bi(language, "bulan ini ", "this month: ")}<em>{monthMood.title}</em></h1>
               <p>{monthMood.copy}</p>
-              <div className="mood-meta"><span>{bi(language, "MONEY HEALTH", "MONEY HEALTH")}</span><strong>{monthStats.healthScore === null ? "—" : `${monthStats.healthScore}/100`}</strong><i>{monthStats.healthScore === null ? bi(language, "belum cukup data", "not enough data") : monthStats.healthScore >= 80 ? bi(language, "rapi", "clean") : monthStats.healthScore >= 60 ? bi(language, "masih waras", "holding up") : bi(language, "butuh perhatian", "needs attention")}</i></div>
+              <div className="mood-meta"><span>{bi(language, "MONEY HEALTH", "MONEY HEALTH")}</span><strong>{monthStats.healthScore === null ? "—" : `${monthStats.healthScore}/100`}</strong><i>{monthStats.healthScore === null ? bi(language, "belum cukup data", "not enough data") : monthStats.healthScore >= 80 ? bi(language, "aman", "good") : monthStats.healthScore >= 60 ? bi(language, "lumayan", "okay") : bi(language, "perlu dicek", "needs a look")}</i></div>
             </div>
             <article className="hero-balance">
               <span>{bi(language, "uang sekarang", "money right now")}</span>
@@ -829,20 +993,20 @@ export default function MoneyApp() {
           <div className="metric-grid four">
             <Metric label={bi(language, "Uang masuk", "Money in")} value={money(totals.income, language)} sub={monthLabel(selectedMonth, language)} tone="positive" />
             <Metric label={bi(language, "Uang keluar", "Money out")} value={money(totals.expense, language)} sub={`${monthTransactions.filter((t) => t.type === "expense").length} ${bi(language, "transaksi", "transactions")}`} tone="negative" />
-            <Metric label={bi(language, "Sisa cashflow", "Net cashflow")} value={money(totals.net, language)} sub={totals.net >= 0 ? bi(language, "masih napas", "still breathing") : bi(language, "minus, noted", "negative, noted")} tone={totals.net >= 0 ? "positive" : "negative"} />
+            <Metric label={bi(language, "Sisa cashflow", "Net cashflow")} value={money(totals.net, language)} sub={totals.net >= 0 ? bi(language, "masih positif", "still positive") : bi(language, "lagi minus", "currently negative")} tone={totals.net >= 0 ? "positive" : "negative"} />
             <Metric label={bi(language, "Jatah kepakai", "Budget used")} value={budgetTotal > 0 ? `${Math.round(budgetUsage)}%` : "—"} sub={budgetTotal > 0 ? `${money(spentAgainstBudget, language)} / ${money(budgetTotal, language)}` : bi(language, "atur batas dulu", "set your limits first")} tone={budgetUsage > 100 ? "negative" : "neutral"} />
           </div>
 
           <div className="pulse-grid">
             <article className="pulse-card"><span>{bi(language, "aman dibelanjain / hari", "safe to spend / day")}</span><strong>{budgetTotal > 0 ? money(monthStats.dailySafe, language) : "—"}</strong><small>{budgetTotal > 0 ? bi(language, `${monthStats.remainingDays} hari tersisa`, `${monthStats.remainingDays} days left`) : bi(language, "set budget dulu", "set a budget first")}</small></article>
             <article className="pulse-card"><span>{bi(language, "burn rate harian", "daily burn rate")}</span><strong>{monthTransactions.length ? money(monthStats.dailyBurn, language) : "—"}</strong><small>{monthTransactions.length ? bi(language, "rata-rata sejauh ini", "average so far") : bi(language, "belum ada transaksi", "no transactions yet")}</small></article>
-            <article className="pulse-card"><span>{bi(language, "hari tanpa belanja", "no-spend days")}</span><strong>{monthTransactions.length ? monthStats.noSpendDays : "—"}</strong><small>{monthTransactions.length ? bi(language, roastMode ? "small win, tetap dihitung" : "bulan ini", roastMode ? "small win, still counts" : "this month") : bi(language, "mulai catat dulu", "start tracking first")}</small></article>
+            <article className="pulse-card"><span>{bi(language, "hari tanpa belanja", "no-spend days")}</span><strong>{monthTransactions.length ? monthStats.noSpendDays : "—"}</strong><small>{monthTransactions.length ? bi(language, roastMode ? "lumayan, tetap kehitung" : "bulan ini", roastMode ? "nice, it still counts" : "this month") : bi(language, "mulai catat dulu", "start tracking first")}</small></article>
             <article className="pulse-card"><span>{bi(language, "proyeksi keluar", "projected spend")}</span><strong>{monthTransactions.length ? money(monthStats.projectedSpend, language) : "—"}</strong><small>{!monthTransactions.length ? bi(language, "belum cukup data", "not enough data") : monthStats.prevDelta === null ? bi(language, "belum ada pembanding", "no comparison yet") : `${monthStats.prevDelta >= 0 ? "+" : ""}${Math.round(monthStats.prevDelta)}% ${bi(language, "vs bulan lalu", "vs last month")}`}</small></article>
           </div>
 
           <div className="dashboard-grid">
             <article className="panel account-panel">
-              <div className="panel-head"><div><span className="eyebrow">{bi(language, "UANG LO TINGGAL DI SINI", "WHERE THE MONEY LIVES")}</span><h2>{bi(language, "rekening & dompet.", "accounts & wallets.")}</h2></div><button type="button" className="text-btn" onClick={() => setTab("settings")}>{bi(language, "Atur →", "Manage →")}</button></div>
+              <div className="panel-head"><div><span className="eyebrow">{bi(language, "TEMPAT UANG", "MONEY SPOTS")}</span><h2>{bi(language, "rekening & dompet.", "accounts & wallets.")}</h2></div><button type="button" className="text-btn" onClick={() => setTab("settings")}>{bi(language, "Atur →", "Manage →")}</button></div>
               <div className="account-list">{activeAccounts.map((account) => <div className="account-row" key={account.id}><div><i>{account.kind}</i><b>{account.name}</b></div><strong>{money(balances[account.id] || 0, language)}</strong></div>)}</div>
             </article>
 
@@ -860,7 +1024,7 @@ export default function MoneyApp() {
 
             <article className="panel">
               <div className="panel-head"><div><span className="eyebrow">{bi(language, "BARU KEJADIAN", "RECENT MOVES")}</span><h2>{bi(language, "uangnya barusan ke mana?", "where did it just go?")}</h2></div><button className="text-btn" type="button" onClick={() => setTab("transactions")}>{bi(language, "Semua →", "All →")}</button></div>
-              <div className="mini-tx-list">{monthTransactions.slice(0, 6).map((tx) => <MiniTransaction key={tx.id} tx={tx} accountMap={accountMap} categoryMap={categoryMap} language={language} />)}{monthTransactions.length === 0 && <p className="muted-empty">{bi(language, roastMode ? "Masih bersih. Mencurigakan, tapi bagus." : "Belum ada transaksi bulan ini.", roastMode ? "Still clean. Suspicious, but good." : "No transactions this month yet.")}</p>}</div>
+              <div className="mini-tx-list">{monthTransactions.slice(0, 6).map((tx) => <MiniTransaction key={tx.id} tx={tx} accountMap={accountMap} categoryMap={categoryMap} language={language} />)}{monthTransactions.length === 0 && <p className="muted-empty">{bi(language, roastMode ? "Belum ada transaksi. Santai, baru mulai." : "Belum ada transaksi bulan ini.", roastMode ? "No transactions yet. Easy, we just started." : "No transactions this month yet.")}</p>}</div>
             </article>
           </div>
         </section>
@@ -868,52 +1032,57 @@ export default function MoneyApp() {
 
       {tab === "payday" && (
         <section className="page">
-          <div className="section-heading first-heading"><div><span className="eyebrow">{bi(language, "GAJIAN TURUN", "PAYDAY MODE")}</span><h1 className="page-title">{bi(language, "bagi dulu sebelum hilang sendiri.", "split it before it disappears.")}</h1></div><p>{bi(language, "Sisihin yang wajib, kasih tujuan ke sisanya, baru silakan hidup.", "Cover the essentials, give the rest a job, then go live your life.")}</p></div>
+          <div className="section-heading first-heading"><div><span className="eyebrow">{bi(language, "GAJIAN MASUK", "PAYDAY")}</span><h1 className="page-title">{bi(language, "bagi dulu. baru jalan.", "split it first. then move.")}</h1></div><p>{bi(language, "Yang wajib beres, sisanya kasih jatah. Simple.", "Cover the fixed stuff, then give the rest a lane. Simple.")}</p></div>
 
           <div className="payday-hero">
-            <label className="big-input"><span>{bi(language, "Uang masuk bulan ini", "Monthly take-home")}</span><div><b>Rp</b><input type="number" min={0} step={50_000} placeholder="0" value={monthlyIncome || ""} onChange={(e) => changeMonthlyIncome(e.target.value)} /></div><small>{bi(language, "Begitu diketik, semua nominal pembagian langsung ikut berubah.", "Every allocation updates instantly as you type.")}</small></label>
-            <label className="big-input"><span>{bi(language, "Yang wajib dulu · opsional", "Essentials reserve · optional")}</span><div><b>Rp</b><input type="number" min={0} max={monthlyIncome || undefined} step={50_000} placeholder="0" value={essentialReserve || ""} onChange={(e) => changeEssentialReserve(e.target.value)} /></div><small>{bi(language, "Nggak bisa lebih besar dari uang masuk. Jadi nggak ada lagi Rp0 misterius.", "Never exceeds your income, so no more mystery Rp0.")}</small></label>
+            <label className="big-input"><span>{bi(language, "Uang masuk bulan ini", "Monthly take-home")}</span><div><b>Rp</b><input type="number" min={0} step={50_000} placeholder="0" value={monthlyIncome || ""} onChange={(e) => changeMonthlyIncome(e.target.value)} /></div><small>{bi(language, "Nominal jatah ikut berubah otomatis.", "Bucket amounts update automatically.")}</small></label>
+            <label className="big-input"><span>{bi(language, "Yang wajib dulu · opsional", "Fixed stuff first · optional")}</span><div><b>Rp</b><input type="number" min={0} max={monthlyIncome || undefined} step={50_000} placeholder="0" value={essentialReserve || ""} onChange={(e) => changeEssentialReserve(e.target.value)} /></div><small>{bi(language, "Buat kebutuhan yang memang nggak bisa ditawar.", "For costs that genuinely cannot move.")}</small></label>
             <article className="distributable-card"><span>{bi(language, "siap dibagi", "ready to split")}</span><strong>{money(distributable, language)}</strong><small>{monthlyIncome > 0 ? `${Math.round((distributable / monthlyIncome) * 100)}% ${bi(language, "dari pemasukan", "of income")}` : "0%"}</small></article>
           </div>
 
-          <div className="payday-layout">
-            <article className="donut-card payday-donut"><div className="donut" style={donutStyle}><div className="donut-hole"><small>{bi(language, "SIAP", "READY")}</small><strong>100%</strong><span>{compactMoney(distributable, language)}</span></div></div><div className="legend">{buckets.map((bucket, index) => <div key={bucket.id}><i className={`dot c${index + 1}`} /><span>{bucketDisplayName(bucket, language)}</span><b>{bucket.percent}%</b></div>)}</div></article>
-            <div className="preset-grid payday-presets">{Object.entries(PRESETS).map(([key, preset]) => { const copy: Record<string, [string, string]> = { balanced: ["Aman tapi masih hidup.", "Responsible, still alive."], safety: ["Safety net dulu. Flex belakangan.", "Safety net first. Flex later."], goals: ["Target dulu. Dopamine nanti.", "Goal first. Dopamine later."], strict: ["Mode jangan macam-macam.", "No-nonsense mode."] }; return <button type="button" className="preset-card" key={key} onClick={() => applyPreset(key as keyof typeof PRESETS)}><span>{preset.label}</span><small>{bi(language, copy[key][0], copy[key][1])}</small><b>↗</b></button>; })}</div>
+          <div className="split-toolbar">
+            <div><span className="eyebrow">{bi(language, "PILIH STARTER ATAU BIKIN SENDIRI", "START WITH A TEMPLATE OR MAKE YOUR OWN")}</span><p>{bi(language, "Default-nya kosong. Jatah bisa ditambah, diganti nama, dikunci, atau dihapus kapan aja.", "It starts empty. Add, rename, lock, or remove buckets whenever you want.")}</p></div>
+            <div className="split-toolbar-actions"><button className="ghost-btn" type="button" onClick={() => applyTemplate("upil")}>{bi(language, "PAKAI UPIL NABUNG", "USE UPIL NABUNG")}</button><button className="primary-btn" type="button" onClick={addBucket}>+ {bi(language, "TAMBAH JATAH", "ADD BUCKET")}</button>{buckets.length > 0 && <button className="text-btn danger-text" type="button" onClick={clearBuckets}>{bi(language, "Kosongkan", "Clear")}</button>}</div>
           </div>
 
-          <div className="bucket-stack">{buckets.map((bucket, index) => (
-            <article className="bucket-card" key={bucket.id}><div className="bucket-index">0{index + 1}</div><div className="bucket-main"><div className="bucket-title-row"><div><h3>{bucketDisplayName(bucket, language)}</h3><p>{bucketDisplayNote(bucket, language)}</p></div><div className="bucket-amount"><strong>{money(allocation[bucket.id], language)}</strong><span>{bucket.percent}%</span></div></div><div className="range-row"><input type="range" min={0} max={100} value={bucket.percent} disabled={bucket.locked} onChange={(e) => changePercent(bucket.id, Number(e.target.value))} /><input className="pct-input" type="number" min={0} max={100} value={bucket.percent} disabled={bucket.locked} onChange={(e) => changePercent(bucket.id, Number(e.target.value))} /><span className="pct-sign">%</span><button type="button" className={bucket.locked ? "lock-btn locked" : "lock-btn"} onClick={() => setBuckets((current) => current.map((item) => item.id === bucket.id ? { ...item, locked: !item.locked } : item))}>{bucket.locked ? bi(language, "DIKUNCI", "LOCKED") : bi(language, "KUNCI", "LOCK")}</button></div></div></article>
-          ))}</div>
+          <div className="payday-layout">
+            <article className="donut-card payday-donut"><div className="donut" style={donutStyle}><div className="donut-hole"><small>{buckets.length ? bi(language, "DIBAGI", "SPLIT") : bi(language, "KOSONG", "EMPTY")}</small><strong>{buckets.length ? `${allocationPercent}%` : "0%"}</strong><span>{compactMoney(allocatedAmount, language)}</span></div></div><div className="legend">{buckets.length ? buckets.map((bucket, index) => <div key={bucket.id}><i className={`dot c${(index % 4) + 1}`} /><span>{bucketDisplayName(bucket, language)}</span><b>{bucket.percent}%</b></div>) : <p className="muted-empty mini-empty">{bi(language, "Belum ada jatah.", "No buckets yet.")}</p>}</div></article>
+            <div className="preset-grid payday-presets">{Object.entries(PAYDAY_TEMPLATES).map(([key, template]) => <button type="button" className="preset-card" key={key} onClick={() => applyTemplate(key as keyof typeof PAYDAY_TEMPLATES)}><span>{template.label}</span><small>{bi(language, template.captionId, template.captionEn)}</small><b>↗</b></button>)}<button type="button" className="preset-card custom-preset" onClick={addBucket}><span>{bi(language, "Bikin sendiri", "Build your own")}</span><small>{bi(language, "Mulai satu jatah, tambah sesuai hidup lo.", "Start with one bucket and build from there.")}</small><b>＋</b></button></div>
+          </div>
 
-          <div className="summary-panel"><div><span>{bi(language, "Jangan disentuh", "Do not touch")}</span><strong>{money(allocation.emergency, language)}</strong></div><div><span>{bi(language, "Lagi ngejar", "Goals")}</span><strong>{money(allocation.goals, language)}</strong></div><div><span>{bi(language, "Boleh khilaf", "Fun money")}</span><strong>{money(plannedFun, language)}</strong></div><div><span>{bi(language, "Buat nanti", "Planned savings")}</span><strong>{money(plannedSavings, language)}</strong></div></div>
-          <div className="payday-actions payday-actions-v4"><button className="primary-btn" type="button" onClick={commitPayday}>{bi(language, "SIMPAN RENCANA", "SAVE PLAN")}</button><div className="payday-record"><select aria-label={bi(language, "Rekening tujuan gajian", "Payday destination account")} value={paydayAccountId} onChange={(e) => setPaydayAccountId(e.target.value)}>{activeAccounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</select><button className="ghost-btn" type="button" disabled={!activeAccounts.length || monthlyIncome <= 0} onClick={recordPaydayToBalance}>{bi(language, "CATAT GAJIAN KE SALDO", "ADD PAYDAY TO BALANCE")}</button></div><small>{bi(language, "Pembagian di atas adalah rencana. Kalau mau angka di Bulan Ini ikut berubah, catat gajian ke saldo.", "The split above is a plan. To update This Month and your balance, add payday to an account.")}</small></div>
+          {buckets.length === 0 ? <div className="empty-state split-empty"><b>{bi(language, "BELUM ADA JATAH.", "NO BUCKETS YET.")}</b><p>{bi(language, "Pakai preset Upil Nabung kalau mau langsung mulai, atau bikin struktur sendiri dari nol.", "Use Upil Nabung to get moving, or build your own split from scratch.")}</p></div> : <div className="bucket-stack">{buckets.map((bucket, index) => (
+            <article className="bucket-card" key={bucket.id}><div className="bucket-index">{String(index + 1).padStart(2, "0")}</div><div className="bucket-main"><div className="bucket-title-row"><div className="bucket-copy-edit"><input className="bucket-name-input" aria-label={bi(language, "Nama jatah", "Bucket name")} maxLength={32} value={bucket.name} onChange={(e) => setBuckets((current) => current.map((item) => item.id === bucket.id ? { ...item, name: e.target.value } : item))} /><p>{bucketDisplayNote(bucket, language)}</p></div><div className="bucket-amount"><strong>{money(allocation[bucket.id] || 0, language)}</strong><span>{bucket.percent}%</span></div></div><div className="range-row"><input type="range" min={0} max={100} value={bucket.percent} disabled={bucket.locked} onChange={(e) => changePercent(bucket.id, Number(e.target.value))} /><input className="pct-input" type="number" min={0} max={100} value={bucket.percent} disabled={bucket.locked} onChange={(e) => changePercent(bucket.id, Number(e.target.value))} /><span className="pct-sign">%</span><button type="button" className={bucket.locked ? "lock-btn locked" : "lock-btn"} onClick={() => setBuckets((current) => current.map((item) => item.id === bucket.id ? { ...item, locked: !item.locked } : item))}>{bucket.locked ? bi(language, "DIKUNCI", "LOCKED") : bi(language, "KUNCI", "LOCK")}</button><button type="button" className="bucket-delete" aria-label={bi(language, "Hapus jatah", "Delete bucket")} onClick={() => removeBucket(bucket.id)}>×</button></div></div></article>
+          ))}<button className="add-bucket-row" type="button" onClick={addBucket}>+ {bi(language, "tambah jatah lagi", "add another bucket")}</button></div>}
 
-          {paydayHistory.length > 0 && <div className="history-list compact-history"><div className="panel-head"><div><span className="eyebrow">{bi(language, "RIWAYAT GAJIAN", "PAYDAY HISTORY")}</span><h2>{bi(language, "pernah dibagi begini.", "recent splits.")}</h2></div></div>{paydayHistory.slice(0, 6).map((run) => <article className="history-card" key={run.id}><div><span>{new Intl.DateTimeFormat(language === "id" ? "id-ID" : "en-US", { dateStyle: "medium", timeStyle: "short" }).format(new Date(run.createdAt))}</span><strong>{money(run.distributable, language)} {bi(language, "dibagi", "split")}</strong></div><div className="history-pills"><i>E {run.buckets.emergency}%</i><i>G {run.buckets.goals}%</i><i>N {run.buckets.hangout}%</i><i>I {run.buckets.impulse}%</i></div><div className="history-actions"><button type="button" onClick={() => setPaydayHistory((current) => current.filter((x) => x.id !== run.id))}>{bi(language, "Hapus", "Delete")}</button></div></article>)}</div>}
+          <div className="summary-panel"><div><span>{bi(language, "Uang masuk", "Income")}</span><strong>{money(monthlyIncome, language)}</strong></div><div><span>{bi(language, "Yang wajib", "Fixed first")}</span><strong>{money(essentialReserve, language)}</strong></div><div><span>{bi(language, "Siap dibagi", "Ready to split")}</span><strong>{money(distributable, language)}</strong></div><div><span>{bi(language, "Jatah aktif", "Active buckets")}</span><strong>{buckets.length}</strong></div></div>
+          <div className="payday-actions payday-actions-v4"><button className="primary-btn" type="button" disabled={!buckets.length} onClick={commitPayday}>{bi(language, "SIMPAN RENCANA", "SAVE PLAN")}</button><div className="payday-record"><select aria-label={bi(language, "Rekening tujuan gajian", "Payday destination account")} value={paydayAccountId} onChange={(e) => setPaydayAccountId(e.target.value)}>{activeAccounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</select><button className="ghost-btn" type="button" disabled={!activeAccounts.length || monthlyIncome <= 0} onClick={recordPaydayToBalance}>{bi(language, "CATAT GAJIAN KE SALDO", "ADD PAYDAY TO BALANCE")}</button></div><small>{bi(language, "Rencana pembagian dan saldo itu beda. Catat ke saldo kalau uangnya memang sudah masuk.", "A split plan and your actual balance are different. Add it to balance only when the money actually lands.")}</small></div>
+
+          {paydayHistory.length > 0 && <div className="history-list compact-history"><div className="panel-head"><div><span className="eyebrow">{bi(language, "RIWAYAT GAJIAN", "PAYDAY HISTORY")}</span><h2>{bi(language, "split yang pernah disimpan.", "saved splits.")}</h2></div></div>{paydayHistory.slice(0, 6).map((run) => <article className="history-card" key={run.id}><div><span>{new Intl.DateTimeFormat(language === "id" ? "id-ID" : "en-US", { dateStyle: "medium", timeStyle: "short" }).format(new Date(run.createdAt))}</span><strong>{money(run.distributable, language)} {bi(language, "dibagi", "split")}</strong></div><div className="history-pills">{Object.entries(run.buckets || {}).slice(0, 6).map(([id, percent]) => <i key={id}>{run.bucketNames?.[id] || buckets.find((bucket) => bucket.id === id)?.name || ({ emergency: bi(language, "Dana Darurat", "Emergency Fund"), goals: "Goals", hangout: bi(language, "Nongkrong", "Going Out"), impulse: bi(language, "Impulsif", "Impulse") } as Record<string, string>)[id] || bi(language, "Jatah", "Bucket")} {percent}%</i>)}</div><div className="history-actions"><button type="button" onClick={() => setPaydayHistory((current) => current.filter((x) => x.id !== run.id))}>{bi(language, "Hapus", "Delete")}</button></div></article>)}</div>}
         </section>
       )}
 
       {tab === "transactions" && (
         <section className="page">
-          <div className="section-heading first-heading"><div><span className="eyebrow">{bi(language, "UANGNYA KE MANA?", "MONEY MOVES")}</span><h1 className="page-title">{bi(language, "semua gerak-gerik duit, kelihatan.", "every move, accounted for.")}</h1></div><p>{bi(language, "Masuk, keluar, pindahan. Nggak ada lagi transaksi jadi urban legend.", "Income, expense, transfers. No more mystery transactions.")}</p></div>
+          <div className="section-heading first-heading"><div><span className="eyebrow">{bi(language, "UANGNYA KE MANA?", "MONEY MOVES")}</span><h1 className="page-title">{bi(language, "semua masuk-keluar ada jejaknya.", "every in and out, in one place.")}</h1></div><p>{bi(language, "Catat sekali, biar akhir bulan nggak perlu nebak-nebak.", "Track it once so month-end is not a guessing game.")}</p></div>
           <TransactionComposer accounts={activeAccounts} categories={activeCategories} onAdd={addTransaction} language={language} />
-          <div className="tx-toolbar"><input value={txSearch} onChange={(e) => setTxSearch(e.target.value)} placeholder={bi(language, "cari tersangka...", "search the suspects...")} /><div className="tx-filter">{(["all", "expense", "income", "transfer"] as const).map((value) => <button type="button" key={value} className={txTypeFilter === value ? "active" : ""} onClick={() => setTxTypeFilter(value)}>{value === "all" ? bi(language, "semua", "all") : value}</button>)}</div></div>
+          <div className="tx-toolbar"><input value={txSearch} onChange={(e) => setTxSearch(e.target.value)} placeholder={bi(language, "cari transaksi...", "search transactions...")} /><div className="tx-filter">{(["all", "expense", "income", "transfer"] as const).map((value) => <button type="button" key={value} className={txTypeFilter === value ? "active" : ""} onClick={() => setTxTypeFilter(value)}>{value === "all" ? bi(language, "semua", "all") : value}</button>)}</div></div>
           <div className="transactions-grid">
             <CalendarPanel selectedMonth={selectedMonth} transactions={monthTransactions} selectedDay={dayFilter} onSelectDay={setDayFilter} language={language} />
-            <article className="panel ledger-panel"><div className="panel-head"><div><span className="eyebrow">{dayFilter ? `${bi(language, "TANGGAL", "DAY")} ${dayFilter}` : bi(language, "BULAN", "MONTH")}</span><h2>{dayFilter ? `${dayFilter} ${monthLabel(selectedMonth, language)}` : monthLabel(selectedMonth, language)}</h2></div>{dayFilter && <button className="text-btn" type="button" onClick={() => setDayFilter(null)}>{bi(language, "Hapus filter", "Clear filter")}</button>}</div><div className="ledger-list">{filteredTransactions.map((tx) => <LedgerRow key={tx.id} tx={tx} accountMap={accountMap} categoryMap={categoryMap} onDelete={() => deleteTransaction(tx.id)} language={language} />)}{filteredTransactions.length === 0 && <p className="muted-empty">{bi(language, roastMode ? "Nggak ketemu. Tersangkanya punya alibi." : "Tidak ada transaksi yang cocok.", roastMode ? "Nothing found. The suspect has an alibi." : "No matching transactions.")}</p>}</div></article>
+            <article className="panel ledger-panel"><div className="panel-head"><div><span className="eyebrow">{dayFilter ? `${bi(language, "TANGGAL", "DAY")} ${dayFilter}` : bi(language, "BULAN", "MONTH")}</span><h2>{dayFilter ? `${dayFilter} ${monthLabel(selectedMonth, language)}` : monthLabel(selectedMonth, language)}</h2></div>{dayFilter && <button className="text-btn" type="button" onClick={() => setDayFilter(null)}>{bi(language, "Hapus filter", "Clear filter")}</button>}</div><div className="ledger-list">{filteredTransactions.map((tx) => <LedgerRow key={tx.id} tx={tx} accountMap={accountMap} categoryMap={categoryMap} onDelete={() => deleteTransaction(tx.id)} language={language} />)}{filteredTransactions.length === 0 && <p className="muted-empty">{bi(language, "Nggak ada transaksi yang cocok.", "No matching transactions.")}</p>}</div></article>
           </div>
         </section>
       )}
 
       {tab === "goals" && (
         <section className="page">
-          <div className="section-heading first-heading"><div><span className="eyebrow">{bi(language, "LAGI NGEJAR", "GOAL ENGINE")}</span><h1 className="page-title">{bi(language, "future you lagi nabung.", "make future money visible.")}</h1></div><button className="primary-btn" type="button" onClick={() => setGoals((current) => [...current, { id: uid("goal"), name: bi(language, "Target Baru", "New Goal"), kind: "goal", current: 0, target: 0, monthlyContribution: 0, targetDate: "", priority: "medium" }])}>{bi(language, "+ TAMBAH TARGET", "+ ADD GOAL")}</button></div>
+          <div className="section-heading first-heading"><div><span className="eyebrow">{bi(language, "LAGI NGEJAR", "SAVING FOR")}</span><h1 className="page-title">{bi(language, "yang lo pengen, progressnya kelihatan.", "what you want, with actual progress.")}</h1></div><button className="primary-btn" type="button" onClick={() => setGoals((current) => [...current, { id: uid("goal"), name: bi(language, "Target Baru", "New Goal"), kind: "goal", current: 0, target: 0, monthlyContribution: 0, targetDate: "", priority: "medium" }])}>{bi(language, "+ TAMBAH TARGET", "+ ADD GOAL")}</button></div>
           <div className="goal-grid">{goals.map((goal) => <GoalCard key={goal.id} goal={goal} onChange={(next) => setGoals((current) => current.map((item) => item.id === goal.id ? next : item))} onDelete={goal.kind === "emergency" ? undefined : () => setGoals((current) => current.filter((item) => item.id !== goal.id))} language={language} />)}</div>
         </section>
       )}
 
       {tab === "recurring" && (
         <section className="page">
-          <div className="section-heading first-heading"><div><span className="eyebrow">{bi(language, "DATANG LAGI", "AUTOPILOT")}</span><h1 className="page-title">{bi(language, "tagihan emang konsisten banget.", "recurring money, minus the forgetting.")}</h1></div><button className="primary-btn" type="button" onClick={applyRecurringDue}>{bi(language, `TERAPKAN YANG JATUH TEMPO · ${monthLabel(selectedMonth, language)}`, `APPLY DUE · ${monthLabel(selectedMonth, language)}`)}</button></div>
+          <div className="section-heading first-heading"><div><span className="eyebrow">{bi(language, "DATANG LAGI", "AUTOPILOT")}</span><h1 className="page-title">{bi(language, "yang rutin, biar nggak kelupaan.", "the recurring stuff, handled.")}</h1></div><button className="primary-btn" type="button" onClick={applyRecurringDue}>{bi(language, `TERAPKAN YANG JATUH TEMPO · ${monthLabel(selectedMonth, language)}`, `APPLY DUE · ${monthLabel(selectedMonth, language)}`)}</button></div>
           <RecurringComposer accounts={activeAccounts} categories={activeCategories} onAdd={(rule) => { setRecurring((current) => [rule, ...current]); flash(bi(language, "Recurring ditambah", "Recurring rule added")); }} language={language} />
           <div className="recurring-list">{recurring.map((rule) => <article className="recurring-card" key={rule.id}><div className="recurring-day"><span>{bi(language, "TGL", "DAY")}</span><b>{rule.day}</b></div><div className="recurring-copy"><div><strong>{rule.name}</strong><span>{rule.type} · {accountMap.get(rule.accountId)?.name || bi(language, "Akun nggak dikenal", "Unknown account")}{rule.categoryId ? ` · ${categoryMap.get(rule.categoryId)?.name || bi(language, "Kategori", "Category")}` : ""}</span></div><b className={rule.type === "income" ? "positive" : "negative"}>{rule.type === "income" ? "+" : "−"}{money(rule.amount, language)}</b></div><div className="recurring-actions"><button type="button" className={rule.active ? "status-btn active" : "status-btn"} onClick={() => setRecurring((current) => current.map((item) => item.id === rule.id ? { ...item, active: !item.active } : item))}>{rule.active ? bi(language, "AKTIF", "ACTIVE") : bi(language, "PAUSE", "PAUSED")}</button><button type="button" className="icon-danger" onClick={() => setRecurring((current) => current.filter((item) => item.id !== rule.id))}>×</button></div></article>)}{recurring.length === 0 && <div className="empty-state"><b>{bi(language, "BELUM ADA YANG BALIK LAGI.", "NO RECURRING RULES.")}</b><p>{bi(language, "Masukin gaji, subscription, kos, tagihan, atau hal yang rajin datang tiap bulan.", "Add salary, subscriptions, rent, bills, or anything that reliably comes back every month.")}</p></div>}</div>
         </section>
@@ -921,30 +1090,29 @@ export default function MoneyApp() {
 
       {tab === "analytics" && (
         <section className="page">
-          <div className="section-heading first-heading"><div><span className="eyebrow">{bi(language, "CEK POLA", "PATTERNS")}</span><h1 className="page-title">{bi(language, "lihat kebiasaan sebelum jadi kebiasaan buruk.", "see the pattern before it becomes a habit.")}</h1></div><p>{bi(language, "Plan vs actual, tren enam bulan, dan kategori mana yang paling haus uang.", "Plan vs actual, six-month trends, and which categories are drinking the budget.")}</p></div>
-          <div className="metric-grid four"><Metric label={bi(language, "Uang masuk", "Actual income")} value={money(totals.income, language)} sub={bi(language, "bulan ini", "this month")} tone="positive" /><Metric label={bi(language, "Uang keluar", "Actual spend")} value={money(totals.expense, language)} sub={bi(language, "bulan ini", "this month")} tone="negative" /><Metric label="Net" value={money(totals.net, language)} sub={`${Math.round(totals.savingsRate)}% ${bi(language, "saving rate aktual", "actual savings rate")}`} tone={totals.net >= 0 ? "positive" : "negative"} /><Metric label={bi(language, "Plan: simpan", "Plan: save")} value={money(plannedSavings, language)} sub={`${buckets[0].percent + buckets[1].percent}% ${bi(language, "dari uang siap dibagi", "of distributable")}`} tone="neutral" /></div>
+          <div className="section-heading first-heading"><div><span className="eyebrow">{bi(language, "CEK POLA", "PATTERNS")}</span><h1 className="page-title">{bi(language, "lihat pola sebelum kebablasan.", "spot the pattern before it gets expensive.")}</h1></div><p>{bi(language, "Plan vs actual, tren enam bulan, dan bagian mana yang paling banyak makan budget.", "Plan vs actual, six-month trends, and where the budget is actually going.")}</p></div>
+          <div className="metric-grid four"><Metric label={bi(language, "Uang masuk", "Actual income")} value={money(totals.income, language)} sub={bi(language, "bulan ini", "this month")} tone="positive" /><Metric label={bi(language, "Uang keluar", "Actual spend")} value={money(totals.expense, language)} sub={bi(language, "bulan ini", "this month")} tone="negative" /><Metric label="Net" value={money(totals.net, language)} sub={`${Math.round(totals.savingsRate)}% ${bi(language, "saving rate aktual", "actual savings rate")}`} tone={totals.net >= 0 ? "positive" : "negative"} /><Metric label={bi(language, "Plan: dibagi", "Plan: split")} value={money(allocatedAmount, language)} sub={buckets.length ? `${buckets.length} ${bi(language, "jatah aktif", "active buckets")}` : bi(language, "belum ada pembagian", "no split yet")} tone="neutral" /></div>
           <article className="panel trend-panel"><div className="panel-head"><div><span className="eyebrow">{bi(language, "TREN 6 BULAN", "6 MONTH TREND")}</span><h2>{bi(language, "masuk vs keluar.", "income vs spending.")}</h2></div></div><TrendChart data={monthTrend} language={language} /></article>
-          <div className="analytics-grid"><article className="panel"><div className="panel-head"><div><span className="eyebrow">{bi(language, "BATAS JATAH", "BUDGET LIMITS")}</span><h2>{bi(language, "kategori mana yang mulai nakal.", "category health.")}</h2></div></div><div className="budget-list">{activeCategories.map((category) => { const spent = categorySpend[category.id] || 0; const pct = category.monthlyLimit > 0 ? (spent / category.monthlyLimit) * 100 : 0; return <BudgetBar key={category.id} name={category.name} spent={spent} limit={category.monthlyLimit} percent={pct} language={language} />; })}</div></article><article className="panel"><div className="panel-head"><div><span className="eyebrow">{bi(language, "DUITNYA KE SINI", "SPENDING MIX")}</span><h2>{bi(language, "siapa yang paling banyak makan budget.", "where it went.")}</h2></div></div><SpendingMix categories={activeCategories} categorySpend={categorySpend} language={language} /></article></div>
+          <div className="analytics-grid"><article className="panel"><div className="panel-head"><div><span className="eyebrow">{bi(language, "BATAS JATAH", "BUDGET LIMITS")}</span><h2>{bi(language, "kategori yang mulai mepet.", "category health.")}</h2></div></div><div className="budget-list">{activeCategories.map((category) => { const spent = categorySpend[category.id] || 0; const pct = category.monthlyLimit > 0 ? (spent / category.monthlyLimit) * 100 : 0; return <BudgetBar key={category.id} name={category.name} spent={spent} limit={category.monthlyLimit} percent={pct} language={language} />; })}</div></article><article className="panel"><div className="panel-head"><div><span className="eyebrow">{bi(language, "DUITNYA KE SINI", "SPENDING MIX")}</span><h2>{bi(language, "siapa yang paling banyak makan budget.", "where it went.")}</h2></div></div><SpendingMix categories={activeCategories} categorySpend={categorySpend} language={language} /></article></div>
         </section>
       )}
 
       {tab === "settings" && (
         <section className="page">
-          <div className="section-heading first-heading"><div><span className="eyebrow">BAGI DULU · SYSTEM</span><h1 className="page-title">{bi(language, "atur yang ngatur uang.", "control the control panel.")}</h1></div><p>{bi(language, "Bahasa, personality, rekening, budget, backup, dan cloud. Semua yang nerdy ada di sini.", "Language, personality, accounts, budgets, backup, and cloud. All the nerdy stuff lives here.")}</p></div>
+          <div className="section-heading first-heading"><div><span className="eyebrow">BAGI DULU · SYSTEM</span><h1 className="page-title">{bi(language, "atur yang ngatur uang.", "control the control panel.")}</h1></div><p>{bi(language, "Bahasa, rekening, budget, backup, dan cloud. Yang teknis tinggal di sini.", "Language, accounts, budgets, backup, and cloud. The technical stuff lives here.")}</p></div>
           <div className="settings-grid wide-settings">
             <article className="settings-card personality-card"><h2>{bi(language, "Bahasa & personality", "Language & personality")}</h2><p>{bi(language, "Dua bahasa. Satu dompet. Humor bisa dimatiin kalau lagi pengen serius.", "Two languages. One wallet. Turn the jokes off when you need the app to behave.")}</p><div className="settings-choice"><span>{bi(language, "Bahasa", "Language")}</span><div className="lang-toggle large"><button type="button" className={language === "id" ? "active" : ""} onClick={() => setLanguage("id")}>Indonesia</button><button type="button" className={language === "en" ? "active" : ""} onClick={() => setLanguage("en")}>English</button></div></div><div className="settings-choice"><span>{bi(language, "Roast mode", "Roast mode")}</span><button className={roastMode ? "status-btn active" : "status-btn"} type="button" onClick={() => setRoastMode((value) => !value)}>{roastMode ? bi(language, "NYALA", "ON") : bi(language, "TENANG", "OFF")}</button></div></article>
             <AccountSettings accounts={accounts} balances={balances} onChange={setAccounts} language={language} />
             <CategorySettings categories={categories} onChange={setCategories} language={language} />
-            <article className="settings-card"><h2>{bi(language, "Nama bucket gajian", "Payday bucket labels")}</h2><p>{bi(language, "Mau ganti 'Impulsif' jadi 'Kebodohan Terencana'? Silakan.", "Rename 'Fun Money' to 'Planned Bad Decisions' if that's more accurate.")}</p><div className="rename-list">{buckets.map((bucket) => <label key={bucket.id}><span>{bucket.id}</span><input value={bucket.name} onChange={(e) => setBuckets((current) => current.map((item) => item.id === bucket.id ? { ...item, name: e.target.value.slice(0, 32) } : item))} /></label>)}</div></article>
-            <article className="settings-card"><h2>{bi(language, "Backup & kabur", "Backup & export")}</h2><p>{bi(language, "JSON buat seluruh state. CSV buat dibawa ke spreadsheet kalau tiba-tiba kangen Excel.", "JSON keeps the whole app state. CSV is for when you suddenly miss spreadsheets.")}</p><div className="button-column"><button className="primary-btn" type="button" onClick={exportJson}>{bi(language, "EXPORT SEMUA JSON", "EXPORT FULL JSON")}</button><button className="ghost-btn wide" type="button" onClick={exportTransactionsCsv}>{bi(language, "EXPORT TRANSAKSI CSV", "EXPORT TRANSACTIONS CSV")}</button><button className="ghost-btn wide" type="button" onClick={() => importRef.current?.click()}>{bi(language, "IMPORT BACKUP BAGI", "IMPORT BAGI BACKUP")}</button><input ref={importRef} hidden type="file" accept="application/json,.json" onChange={importJson} /></div></article>
+            <article className="settings-card"><h2>{bi(language, "Backup & export", "Backup & export")}</h2><p>{bi(language, "JSON buat backup lengkap. CSV buat transaksi kalau mau diolah di spreadsheet.", "JSON keeps a full backup. CSV exports transactions for spreadsheets.")}</p><div className="button-column"><button className="primary-btn" type="button" onClick={exportJson}>{bi(language, "EXPORT SEMUA JSON", "EXPORT FULL JSON")}</button><button className="ghost-btn wide" type="button" onClick={exportTransactionsCsv}>{bi(language, "EXPORT TRANSAKSI CSV", "EXPORT TRANSACTIONS CSV")}</button><button className="ghost-btn wide" type="button" onClick={() => importRef.current?.click()}>{bi(language, "IMPORT BACKUP BAGI", "IMPORT BAGI BACKUP")}</button><input ref={importRef} hidden type="file" accept="application/json,.json" onChange={importJson} /></div></article>
             <article className="settings-card"><h2>{bi(language, "Privasi & penyimpanan", "Privacy & storage")}</h2><p>{bi(language, "Default-nya local-first. Data tinggal di browser kecuali kamu sendiri nyalain cloud sync.", "Local-first by default. Data stays in the browser unless you explicitly enable cloud sync.")}</p><div className="privacy-stamp">LOCAL FIRST <span>✓</span></div></article>
             <CloudSyncCard state={currentAppState} onApply={applyFullState} flash={flash} language={language} />
-            <article className="settings-card danger-card"><h2>{bi(language, "Zona jangan iseng", "Danger zone")}</h2><p>{bi(language, "Ini ngehapus transaksi, akun, goals, recurring, payday history, dan semua setting lokal.", "This removes transactions, accounts, goals, recurring rules, payday history, and all local settings.")}</p><button className="danger-btn" type="button" onClick={resetAll}>{bi(language, "RESET SEMUANYA", "RESET EVERYTHING")}</button></article>
+            <article className="settings-card danger-card"><h2>{bi(language, "Reset data", "Danger zone")}</h2><p>{bi(language, "Ini ngehapus transaksi, akun, goals, recurring, payday history, dan semua setting lokal.", "This removes transactions, accounts, goals, recurring rules, payday history, and all local settings.")}</p><button className="danger-btn" type="button" onClick={resetAll}>{bi(language, "RESET SEMUANYA", "RESET EVERYTHING")}</button></article>
           </div>
         </section>
       )}
 
-      <footer className="footer"><span>BAGI DULU V4.0</span><p>{bi(language, "money, before it disappears · local-first · bilingual · PWA-ready", "money, before it disappears · local-first · bilingual · PWA-ready")}</p></footer>
+      <footer className="footer"><span>BAGI DULU V5.0</span><p>{bi(language, "money, before it disappears · local-first · bilingual · PWA-ready", "money, before it disappears · local-first · bilingual · PWA-ready")}</p></footer>
       <div className={toast ? "toast show" : "toast"} role="status" aria-live="polite">{toast}</div>
     </main>
   );
@@ -1007,7 +1175,7 @@ function TransactionComposer({ accounts, categories, onAdd, language }: { accoun
     <label><span>{bi(language, "Dari / akun", "From / account")}</span><select value={accountId} onChange={(e) => setAccountId(e.target.value)}>{accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></label>
     {type === "transfer" ? <label><span>{bi(language, "Ke akun", "To account")}</span><select value={toAccountId} onChange={(e) => setToAccountId(e.target.value)}>{accounts.filter((a) => a.id !== accountId).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></label> : type === "expense" ? <label><span>{bi(language, "Kategori", "Category")}</span><select value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>{categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label> : <label><span>{bi(language, "Kategori", "Category")}</span><input disabled value={bi(language, "Uang masuk", "Income")} /></label>}
     <label><span>{bi(language, "Tanggal", "Date")}</span><input required type="date" value={date} onChange={(e) => setDate(e.target.value)} /></label>
-    <label className="tx-note"><span>{bi(language, "Catatan", "Note")}</span><input maxLength={120} placeholder={bi(language, "opsional, tapi nanti berguna", "optional, future you may care")} value={note} onChange={(e) => setNote(e.target.value)} /></label>
+    <label className="tx-note"><span>{bi(language, "Catatan", "Note")}</span><input maxLength={120} placeholder={bi(language, "opsional, biar nggak lupa", "optional, useful later")} value={note} onChange={(e) => setNote(e.target.value)} /></label>
     <button className="primary-btn tx-submit" type="submit">{bi(language, "CATAT", "ADD")} {typeLabel(type).toUpperCase()}</button>
   </form>;
 }
@@ -1213,11 +1381,12 @@ function AccountSettings({ accounts, balances, onChange, language }: { accounts:
   const [kind, setKind] = useState<AccountKind>("bank");
   const [openingBalance, setOpeningBalance] = useState(0);
   function add() {
-    if (!name.trim()) return;
-    onChange([...accounts, { id: uid("acc"), name: name.trim().slice(0, 40), kind, openingBalance, archived: false }]);
+    const fallbackName = kind === "bank" ? "Bank" : kind === "cash" ? "Cash" : kind === "ewallet" ? "E-Wallet" : bi(language, "Tabungan", "Savings");
+    const finalName = (name.trim() || fallbackName).slice(0, 40);
+    onChange([...accounts, { id: uid("acc"), name: finalName, kind, openingBalance, archived: false }]);
     setName(""); setOpeningBalance(0);
   }
-  return <article className="settings-card settings-span"><h2>{bi(language, "Tempat uang", "Accounts")}</h2><p>{bi(language, "Mandiri Utama jadi default. Tambah cash, e-wallet, tabungan, atau bank lain sesuka sistem hidup lo.", "Mandiri Utama is the default. Add cash, e-wallets, savings, or any other bank you use.")}</p><div className="manage-list">{accounts.map((account) => <div className="manage-row" key={account.id}><div><input value={account.name} onChange={(e) => onChange(accounts.map((item) => item.id === account.id ? { ...item, name: e.target.value.slice(0, 40) } : item))} /><span>{account.kind} · {bi(language, "sekarang", "current")} {money(balances[account.id] || 0, language)}</span></div><label><span>{bi(language, "Saldo awal", "Opening")}</span><input type="number" value={account.openingBalance} onChange={(e) => onChange(accounts.map((item) => item.id === account.id ? { ...item, openingBalance: Number(e.target.value) || 0 } : item))} /></label><button type="button" className={account.archived ? "status-btn" : "status-btn active"} disabled={!account.archived && accounts.filter((item) => !item.archived).length <= 1} title={!account.archived && accounts.filter((item) => !item.archived).length <= 1 ? bi(language, "Minimal satu akun harus aktif", "Keep at least one active account") : undefined} onClick={() => onChange(accounts.map((item) => item.id === account.id ? { ...item, archived: !item.archived } : item))}>{account.archived ? bi(language, "ARSIP", "ARCHIVED") : bi(language, "AKTIF", "ACTIVE")}</button></div>)}</div><div className="inline-add"><input placeholder={bi(language, "Akun baru", "New account")} value={name} onChange={(e) => setName(e.target.value)} /><select value={kind} onChange={(e) => setKind(e.target.value as AccountKind)}><option value="bank">Bank</option><option value="cash">Cash</option><option value="ewallet">E-Wallet</option><option value="savings">{bi(language, "Tabungan", "Savings")}</option></select><input type="number" placeholder={bi(language, "Saldo awal", "Opening balance")} value={openingBalance || ""} onChange={(e) => setOpeningBalance(Number(e.target.value) || 0)} /><button className="primary-btn" type="button" onClick={add}>{bi(language, "TAMBAH", "ADD")}</button></div></article>;
+  return <article className="settings-card settings-span"><h2>{bi(language, "Tempat uang", "Accounts")}</h2><p>{bi(language, "Default-nya cuma Bank, Cash, dan E-Wallet. Untuk rekening bank, pilih dari daftar bank umum & syariah Indonesia atau ketik nama sendiri.", "Defaults are Bank, Cash, and E-Wallet. For bank accounts, pick from the Indonesian commercial & sharia bank list or type your own.")}</p><datalist id="indonesian-bank-list">{INDONESIAN_BANKS.map((bank) => <option key={bank} value={bank} />)}</datalist><div className="manage-list">{accounts.map((account) => <div className="manage-row" key={account.id}><div>{account.kind === "bank" ? <input list="indonesian-bank-list" placeholder={bi(language, "Pilih / ketik bank", "Choose / type a bank")} value={account.name === "Bank" ? "" : account.name} onChange={(e) => onChange(accounts.map((item) => item.id === account.id ? { ...item, name: e.target.value.slice(0, 40) || "Bank" } : item))} /> : <input value={account.name} onChange={(e) => onChange(accounts.map((item) => item.id === account.id ? { ...item, name: e.target.value.slice(0, 40) } : item))} />}<span>{account.kind} · {bi(language, "sekarang", "current")} {money(balances[account.id] || 0, language)}</span></div><label><span>{bi(language, "Saldo awal", "Opening")}</span><input type="number" value={account.openingBalance || ""} placeholder="0" onChange={(e) => onChange(accounts.map((item) => item.id === account.id ? { ...item, openingBalance: Number(e.target.value) || 0 } : item))} /></label><button type="button" className={account.archived ? "status-btn" : "status-btn active"} disabled={!account.archived && accounts.filter((item) => !item.archived).length <= 1} title={!account.archived && accounts.filter((item) => !item.archived).length <= 1 ? bi(language, "Minimal satu akun harus aktif", "Keep at least one active account") : undefined} onClick={() => onChange(accounts.map((item) => item.id === account.id ? { ...item, archived: !item.archived } : item))}>{account.archived ? bi(language, "ARSIP", "ARCHIVED") : bi(language, "AKTIF", "ACTIVE")}</button></div>)}</div><div className="inline-add">{kind === "bank" ? <input list="indonesian-bank-list" placeholder={bi(language, "Pilih / ketik bank", "Choose / type a bank")} value={name} onChange={(e) => setName(e.target.value)} /> : <input placeholder={bi(language, "Nama akun", "Account name")} value={name} onChange={(e) => setName(e.target.value)} />}<select value={kind} onChange={(e) => { setKind(e.target.value as AccountKind); setName(""); }}><option value="bank">Bank</option><option value="cash">Cash</option><option value="ewallet">E-Wallet</option><option value="savings">{bi(language, "Tabungan", "Savings")}</option></select><input type="number" placeholder={bi(language, "Saldo awal", "Opening balance")} value={openingBalance || ""} onChange={(e) => setOpeningBalance(Number(e.target.value) || 0)} /><button className="primary-btn" type="button" onClick={add}>{bi(language, "TAMBAH", "ADD")}</button></div><small className="source-note">{bi(language, "Daftar bank: bank umum konvensional & syariah. BPR bisa tetap diketik manual.", "Bank list: commercial and sharia banks. BPRs can still be typed manually.")}</small></article>;
 }
 
 function CategorySettings({ categories, onChange, language }: { categories: Category[]; onChange: (categories: Category[]) => void; language: Language }) {
@@ -1228,5 +1397,5 @@ function CategorySettings({ categories, onChange, language }: { categories: Cate
     onChange([...categories, { id: uid("cat"), name: name.trim().slice(0, 40), monthlyLimit: Math.max(0, limit), archived: false }]);
     setName(""); setLimit(0);
   }
-  return <article className="settings-card settings-span"><h2>{bi(language, "Kategori jatah", "Budget categories")}</h2><p>{bi(language, "Pasang batas bulanan. BAGI bakal kasih tahu kalau sebuah kategori mulai kelewat nyaman.", "Set monthly limits. BAGI will flag categories that are getting a little too comfortable.")}</p><div className="manage-list">{categories.map((category) => <div className="manage-row" key={category.id}><div><input value={category.name} onChange={(e) => onChange(categories.map((item) => item.id === category.id ? { ...item, name: e.target.value.slice(0, 40) } : item))} /><span>{category.archived ? bi(language, "disembunyikan dari transaksi baru", "hidden from new transactions") : bi(language, "tersedia di transaksi", "available in transactions")}</span></div><label><span>{bi(language, "Batas bulanan", "Monthly limit")}</span><input type="number" min={0} value={category.monthlyLimit} onChange={(e) => onChange(categories.map((item) => item.id === category.id ? { ...item, monthlyLimit: Math.max(0, Number(e.target.value) || 0) } : item))} /></label><button type="button" className={category.archived ? "status-btn" : "status-btn active"} disabled={!category.archived && categories.filter((item) => !item.archived).length <= 1} title={!category.archived && categories.filter((item) => !item.archived).length <= 1 ? bi(language, "Minimal satu kategori harus aktif", "Keep at least one active category") : undefined} onClick={() => onChange(categories.map((item) => item.id === category.id ? { ...item, archived: !item.archived } : item))}>{category.archived ? bi(language, "ARSIP", "ARCHIVED") : bi(language, "AKTIF", "ACTIVE")}</button></div>)}</div><div className="inline-add"><input placeholder={bi(language, "Kategori baru", "New category")} value={name} onChange={(e) => setName(e.target.value)} /><input type="number" min={0} placeholder={bi(language, "Batas bulanan", "Monthly limit")} value={limit || ""} onChange={(e) => setLimit(Number(e.target.value) || 0)} /><button className="primary-btn" type="button" onClick={add}>{bi(language, "TAMBAH", "ADD")}</button></div></article>;
+  return <article className="settings-card settings-span"><h2>{bi(language, "Kategori jatah", "Budget categories")}</h2><p>{bi(language, "Pasang batas bulanan. BAGI kasih tanda kalau pengeluaran mulai mendekati atau lewat batas.", "Set monthly limits. BAGI flags categories that are getting close to or over the line.")}</p><div className="manage-list">{categories.map((category) => <div className="manage-row" key={category.id}><div><input value={category.name} onChange={(e) => onChange(categories.map((item) => item.id === category.id ? { ...item, name: e.target.value.slice(0, 40) } : item))} /><span>{category.archived ? bi(language, "disembunyikan dari transaksi baru", "hidden from new transactions") : bi(language, "tersedia di transaksi", "available in transactions")}</span></div><label><span>{bi(language, "Batas bulanan", "Monthly limit")}</span><input type="number" min={0} value={category.monthlyLimit} onChange={(e) => onChange(categories.map((item) => item.id === category.id ? { ...item, monthlyLimit: Math.max(0, Number(e.target.value) || 0) } : item))} /></label><button type="button" className={category.archived ? "status-btn" : "status-btn active"} disabled={!category.archived && categories.filter((item) => !item.archived).length <= 1} title={!category.archived && categories.filter((item) => !item.archived).length <= 1 ? bi(language, "Minimal satu kategori harus aktif", "Keep at least one active category") : undefined} onClick={() => onChange(categories.map((item) => item.id === category.id ? { ...item, archived: !item.archived } : item))}>{category.archived ? bi(language, "ARSIP", "ARCHIVED") : bi(language, "AKTIF", "ACTIVE")}</button></div>)}</div><div className="inline-add"><input placeholder={bi(language, "Kategori baru", "New category")} value={name} onChange={(e) => setName(e.target.value)} /><input type="number" min={0} placeholder={bi(language, "Batas bulanan", "Monthly limit")} value={limit || ""} onChange={(e) => setLimit(Number(e.target.value) || 0)} /><button className="primary-btn" type="button" onClick={add}>{bi(language, "TAMBAH", "ADD")}</button></div></article>;
 }

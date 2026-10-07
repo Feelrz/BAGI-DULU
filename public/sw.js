@@ -1,4 +1,4 @@
-const CACHE = "bagi-v4-shell";
+const CACHE = "bagi-v5-shell";
 const CORE = ["/", "/manifest.webmanifest", "/icon.svg"];
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(CORE)).then(() => self.skipWaiting()));

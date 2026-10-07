@@ -1,6 +1,6 @@
 {
   "name": "bagi-personal-finance-os",
-  "version": "4.0.0",
+  "version": "5.0.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -19,5 +19,5 @@
     "@types/react-dom": "^19.0.0",
     "typescript": "^5.7.0"
   },
-  "description": "BAGI DULU — bilingual, local-first personal finance OS with Gen-Z personality, payday allocation, budgets, goals, recurring money, analytics, and optional cloud sync."
+  "description": "BAGI DULU \u2014 bilingual local-first personal finance app with custom payday buckets, Indonesian bank picker, budgets, goals, recurring money, analytics, and optional cloud sync."
 }
