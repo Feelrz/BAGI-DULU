@@ -402,7 +402,7 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .cloud-user p { margin: 5px 0 0; color: var(--muted); font-size: 11px; }
 .cloud-last { display: block; color: var(--muted); margin-top: 12px; font-size: 9px; }
 
-/* BAGI/ V3 personality + bilingual controls */
+/* BAGI DULU V4 personality + bilingual controls */
 .lang-toggle { display: inline-flex; align-items: center; border: 1px solid var(--line); border-radius: 999px; padding: 3px; background: var(--surface); }
 .lang-toggle button { min-width: 34px; min-height: 31px; border: 0; border-radius: 999px; background: transparent; color: var(--muted); cursor: pointer; font: 900 9px ui-monospace, monospace; letter-spacing: .08em; }
 .lang-toggle button.active { background: var(--accent); color: var(--accent-text); }
@@ -445,4 +445,18 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
   .settings-choice { align-items: flex-start; flex-direction: column; }
   .lang-toggle.large { width: 100%; }
   .lang-toggle.large button { flex: 1; min-width: 0; }
+}
+
+/* V4 payday clarity + no-demo-data polish */
+.big-input > small { display: block; margin-top: 10px; color: var(--muted); font-size: 10px; line-height: 1.45; }
+.payday-actions-v4 { align-items: stretch; flex-wrap: wrap; }
+.payday-record { display: flex; gap: 8px; min-width: 0; }
+.payday-record select { min-height: 40px; max-width: 220px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); padding: 0 10px; }
+.payday-actions-v4 > small { flex: 1 1 100%; line-height: 1.45; }
+.ghost-btn:disabled, .primary-btn:disabled { opacity: .45; cursor: not-allowed; }
+
+@media (max-width: 720px) {
+  .payday-record { width: 100%; flex-direction: column; }
+  .payday-record select { width: 100%; max-width: none; }
+  .payday-record .ghost-btn { width: 100%; }
 }

@@ -78,7 +78,7 @@ type PaydayRun = {
 };
 
 type AppState = {
-  version: 3;
+  version: 4;
   theme: Theme;
   language: Language;
   roastMode: boolean;
@@ -94,8 +94,8 @@ type AppState = {
   paydayHistory: PaydayRun[];
 };
 
-const STORAGE_KEY = "bagi-finance-os-v3";
-const LEGACY_STORAGE_KEY = "bagi-finance-os-v2";
+const STORAGE_KEY = "bagi-finance-os-v4";
+const LEGACY_STORAGE_KEYS = ["bagi-finance-os-v3", "bagi-finance-os-v2"];
 const CLOUD_SESSION_KEY = "bagi-cloud-session-v1";
 
 const DEFAULT_BUCKETS: Bucket[] = [
@@ -112,18 +112,17 @@ const DEFAULT_ACCOUNTS: Account[] = [
 ];
 
 const DEFAULT_CATEGORIES: Category[] = [
-  { id: "food", name: "Makan", monthlyLimit: 1_000_000, archived: false },
-  { id: "transport", name: "Transport", monthlyLimit: 500_000, archived: false },
-  { id: "hangout", name: "Nongkrong", monthlyLimit: 600_000, archived: false },
-  { id: "shopping", name: "Belanja", monthlyLimit: 500_000, archived: false },
-  { id: "subscription", name: "Subscription", monthlyLimit: 250_000, archived: false },
-  { id: "bills", name: "Bills", monthlyLimit: 1_000_000, archived: false },
-  { id: "other", name: "Lainnya", monthlyLimit: 400_000, archived: false },
+  { id: "food", name: "Makan", monthlyLimit: 0, archived: false },
+  { id: "transport", name: "Transport", monthlyLimit: 0, archived: false },
+  { id: "hangout", name: "Nongkrong", monthlyLimit: 0, archived: false },
+  { id: "shopping", name: "Belanja", monthlyLimit: 0, archived: false },
+  { id: "subscription", name: "Subscription", monthlyLimit: 0, archived: false },
+  { id: "bills", name: "Bills", monthlyLimit: 0, archived: false },
+  { id: "other", name: "Lainnya", monthlyLimit: 0, archived: false },
 ];
 
 const DEFAULT_GOALS: Goal[] = [
-  { id: "emergency-fund", name: "Dana Darurat", kind: "emergency", current: 0, target: 12_000_000, monthlyContribution: 1_000_000, targetDate: "", priority: "high" },
-  { id: "main-goal", name: "Main Goal", kind: "goal", current: 0, target: 6_000_000, monthlyContribution: 750_000, targetDate: "", priority: "medium" },
+  { id: "emergency-fund", name: "Dana Darurat", kind: "emergency", current: 0, target: 0, monthlyContribution: 0, targetDate: "", priority: "high" },
 ];
 
 const PRESETS: Record<string, { label: string; caption: string; values: Record<BucketId, number> }> = {
@@ -211,13 +210,13 @@ function distributeInteger(total: number, source: Bucket[]) {
 
 function baseState(): AppState {
   return {
-    version: 3,
+    version: 4,
     theme: "dark",
     language: "id",
     roastMode: true,
     selectedMonth: monthKey(),
-    monthlyIncome: 6_000_000,
-    essentialReserve: 2_000_000,
+    monthlyIncome: 0,
+    essentialReserve: 0,
     buckets: DEFAULT_BUCKETS,
     accounts: DEFAULT_ACCOUNTS,
     categories: DEFAULT_CATEGORIES,
@@ -255,7 +254,7 @@ function normalizeState(input: Partial<AppState>): AppState | null {
       archived: Boolean(a.archived),
     })) : defaults.accounts;
 
-    const categories = Array.isArray(input.categories) && input.categories.length ? input.categories.map((c) => ({
+    let categories = Array.isArray(input.categories) && input.categories.length ? input.categories.map((c) => ({
       id: String(c.id || uid("cat")),
       name: String(c.name || "Category").slice(0, 40),
       monthlyLimit: Math.max(0, Number(c.monthlyLimit) || 0),
@@ -286,7 +285,7 @@ function normalizeState(input: Partial<AppState>): AppState | null {
       active: r.active !== false,
     })) : [];
 
-    const goals = Array.isArray(input.goals) && input.goals.length ? input.goals.map((g) => ({
+    let goals = Array.isArray(input.goals) && input.goals.length ? input.goals.map((g) => ({
       id: String(g.id || uid("goal")),
       name: String(g.name || "Goal").slice(0, 50),
       kind: (g.kind === "emergency" ? "emergency" : "goal") as GoalKind,
@@ -297,21 +296,59 @@ function normalizeState(input: Partial<AppState>): AppState | null {
       priority: (["high", "medium", "low"].includes(g.priority) ? g.priority : "medium") as Goal["priority"],
     })) : defaults.goals;
 
+    const paydayHistory = Array.isArray(input.paydayHistory) ? input.paydayHistory.slice(0, 80) as PaydayRun[] : [];
+    const inputVersion = Number(input.version || 0);
+    const legacyLooksUntouched = inputVersion < 4
+      && transactions.length === 0
+      && recurring.length === 0
+      && paydayHistory.length === 0
+      && accounts.every((account) => account.openingBalance === 0);
+
+    let normalizedMonthlyIncome = Math.max(0, Number(input.monthlyIncome) || 0);
+    let normalizedReserve = Math.max(0, Number(input.essentialReserve) || 0);
+
+    // V2/V3 shipped with demo numbers. Strip only those exact seed values on an untouched profile,
+    // while preserving anything the user actually typed (for example a Rp200k income test).
+    if (legacyLooksUntouched) {
+      if (normalizedMonthlyIncome === 6_000_000) normalizedMonthlyIncome = 0;
+      if (normalizedReserve === 2_000_000) normalizedReserve = 0;
+
+      const oldLimits: Record<string, number> = {
+        food: 1_000_000,
+        transport: 500_000,
+        hangout: 600_000,
+        shopping: 500_000,
+        subscription: 250_000,
+        bills: 1_000_000,
+        other: 400_000,
+      };
+      categories = categories.map((category) => oldLimits[category.id] === category.monthlyLimit ? { ...category, monthlyLimit: 0 } : category);
+
+      goals = goals
+        .filter((goal) => !(goal.id === "main-goal" && goal.current === 0 && goal.target === 6_000_000 && goal.monthlyContribution === 750_000))
+        .map((goal) => goal.id === "emergency-fund" && goal.current === 0 && goal.target === 12_000_000 && goal.monthlyContribution === 1_000_000
+          ? { ...goal, target: 0, monthlyContribution: 0 }
+          : goal);
+    }
+
+    // Reserve can never silently eat more than the income being allocated.
+    normalizedReserve = normalizedMonthlyIncome > 0 ? Math.min(normalizedReserve, normalizedMonthlyIncome) : 0;
+
     return {
-      version: 3,
+      version: 4,
       theme: input.theme === "light" ? "light" : "dark",
       language: input.language === "en" ? "en" : "id",
       roastMode: input.roastMode !== false,
       selectedMonth: /^\d{4}-\d{2}$/.test(String(input.selectedMonth)) ? String(input.selectedMonth) : defaults.selectedMonth,
-      monthlyIncome: Math.max(0, Number(input.monthlyIncome) || 0),
-      essentialReserve: Math.max(0, Number(input.essentialReserve) || 0),
+      monthlyIncome: normalizedMonthlyIncome,
+      essentialReserve: normalizedReserve,
       buckets: cleanedBuckets,
       accounts,
       categories,
       transactions,
       recurring,
       goals,
-      paydayHistory: Array.isArray(input.paydayHistory) ? input.paydayHistory.slice(0, 80) as PaydayRun[] : [],
+      paydayHistory,
     };
   } catch {
     return null;
@@ -339,15 +376,16 @@ export default function MoneyApp() {
   const [dayFilter, setDayFilter] = useState<number | null>(null);
   const [txSearch, setTxSearch] = useState("");
   const [txTypeFilter, setTxTypeFilter] = useState<"all" | TxType>("all");
+  const [paydayAccountId, setPaydayAccountId] = useState(defaults.accounts[0]?.id || "");
   const importRef = useRef<HTMLInputElement>(null);
 
   const currentAppState = useMemo<AppState>(() => ({
-    version: 3, theme, language, roastMode, selectedMonth, monthlyIncome, essentialReserve, buckets, accounts, categories, transactions, recurring, goals, paydayHistory,
+    version: 4, theme, language, roastMode, selectedMonth, monthlyIncome, essentialReserve, buckets, accounts, categories, transactions, recurring, goals, paydayHistory,
   }), [theme, language, roastMode, selectedMonth, monthlyIncome, essentialReserve, buckets, accounts, categories, transactions, recurring, goals, paydayHistory]);
 
   useEffect(() => {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY) || localStorage.getItem(LEGACY_STORAGE_KEY);
+      const raw = localStorage.getItem(STORAGE_KEY) || LEGACY_STORAGE_KEYS.map((key) => localStorage.getItem(key)).find(Boolean);
       if (raw) {
         const saved = normalizeState(JSON.parse(raw));
         if (saved) {
@@ -401,6 +439,11 @@ export default function MoneyApp() {
 
   const activeAccounts = useMemo(() => accounts.filter((a) => !a.archived), [accounts]);
   const activeCategories = useMemo(() => categories.filter((c) => !c.archived), [categories]);
+
+  useEffect(() => {
+    if (!activeAccounts.length) return;
+    if (!activeAccounts.some((account) => account.id === paydayAccountId)) setPaydayAccountId(activeAccounts[0].id);
+  }, [activeAccounts, paydayAccountId]);
   const categoryMap = useMemo(() => new Map(categories.map((c) => [c.id, c])), [categories]);
   const accountMap = useMemo(() => new Map(accounts.map((a) => [a.id, a])), [accounts]);
   const monthTransactions = useMemo(() => transactions.filter((tx) => tx.date.startsWith(selectedMonth)), [transactions, selectedMonth]);
@@ -466,9 +509,14 @@ export default function MoneyApp() {
     if (totals.net < 0) items.push(bi(language, `Cashflow ${monthLabel(selectedMonth, language)} minus ${money(Math.abs(totals.net), language)}.`, `${monthLabel(selectedMonth, language)} cashflow is negative by ${money(Math.abs(totals.net), language)}.`));
     const emergency = goals.find((goal) => goal.kind === "emergency");
     if (emergency && emergency.target > 0 && emergency.current / emergency.target < 0.25) items.push(bi(language, "Dana darurat masih di bawah 25% target.", "Emergency fund is still below 25% of target."));
-    if (items.length === 0) items.push(bi(language, roastMode ? "Nggak ada red flag besar. Dompet masih punya denyut nadi." : "Nggak ada red flag besar bulan ini.", roastMode ? "No major red flags. Wallet still has a pulse." : "No major red flags this month."));
+    if (items.length === 0) {
+      const hasAnyMoneyData = monthTransactions.length > 0 || budgetTotal > 0 || totalBalance !== 0;
+      items.push(hasAnyMoneyData
+        ? bi(language, roastMode ? "Nggak ada red flag besar. Dompet masih punya denyut nadi." : "Nggak ada red flag besar bulan ini.", roastMode ? "No major red flags. Wallet still has a pulse." : "No major red flags this month.")
+        : bi(language, roastMode ? "Belum cukup bukti buat nge-judge. Catat uang dulu." : "Belum cukup data keuangan.", roastMode ? "Not enough evidence to judge you yet. Add some money data first." : "Not enough financial data yet."));
+    }
     return items.slice(0, 4);
-  }, [activeCategories, categorySpend, goals, language, roastMode, selectedMonth, totals.net]);
+  }, [activeCategories, budgetTotal, categorySpend, goals, language, monthTransactions.length, roastMode, selectedMonth, totalBalance, totals.net]);
 
   const previousMonth = shiftMonth(selectedMonth, -1);
   const previousTotals = useMemo(() => {
@@ -489,13 +537,14 @@ export default function MoneyApp() {
     const dailyBurn = totals.expense / elapsed;
     const projectedSpend = current ? dailyBurn * daysInMonth : totals.expense;
     const expenseDays = new Set(monthTransactions.filter((tx) => tx.type === "expense").map((tx) => Number(tx.date.slice(-2))));
-    const noSpendDays = Math.max(0, elapsed - expenseDays.size);
+    const noSpendDays = monthTransactions.length > 0 ? Math.max(0, elapsed - expenseDays.size) : 0;
     const emergency = goals.find((goal) => goal.kind === "emergency");
     const emergencyPct = emergency && emergency.target > 0 ? clamp((emergency.current / emergency.target) * 100, 0, 100) : 0;
+    const hasHealthData = monthTransactions.length > 0 || budgetTotal > 0 || goals.some((goal) => goal.current > 0 || goal.target > 0);
     const budgetScore = budgetTotal <= 0 ? 70 : clamp(100 - Math.max(0, budgetUsage - 65) * 1.6, 0, 100);
     const cashflowScore = totals.income <= 0 ? 60 : clamp(55 + totals.savingsRate, 0, 100);
     const emergencyScore = clamp(emergencyPct, 0, 100);
-    const healthScore = Math.round(budgetScore * 0.45 + cashflowScore * 0.35 + emergencyScore * 0.20);
+    const healthScore = hasHealthData ? Math.round(budgetScore * 0.45 + cashflowScore * 0.35 + emergencyScore * 0.20) : null;
     const prevDelta = previousTotals.expense > 0 ? ((totals.expense - previousTotals.expense) / previousTotals.expense) * 100 : null;
     return { daysInMonth, elapsed, remainingDays, remainingBudget, dailySafe, dailyBurn, projectedSpend, noSpendDays, healthScore, prevDelta };
   }, [budgetTotal, budgetUsage, goals, monthTransactions, previousTotals.expense, selectedMonth, spentAgainstBudget, totals.expense, totals.income, totals.savingsRate]);
@@ -532,6 +581,46 @@ export default function MoneyApp() {
 
   function flash(message: string) {
     setToast(message);
+  }
+
+  function changeMonthlyIncome(raw: string) {
+    const next = Math.max(0, Number(raw) || 0);
+    setMonthlyIncome(next);
+    setEssentialReserve((current) => next > 0 ? Math.min(current, next) : 0);
+  }
+
+  function changeEssentialReserve(raw: string) {
+    const requested = Math.max(0, Number(raw) || 0);
+    setEssentialReserve(monthlyIncome > 0 ? Math.min(requested, monthlyIncome) : 0);
+  }
+
+  function recordPaydayToBalance() {
+    if (monthlyIncome <= 0) {
+      flash(bi(language, "Masukin nominal gajian dulu.", "Enter your payday amount first."));
+      return;
+    }
+    if (!paydayAccountId) {
+      flash(bi(language, "Pilih rekening tujuan dulu.", "Choose a destination account first."));
+      return;
+    }
+    const marker = `BAGI DULU · ${selectedMonth}`;
+    const exists = transactions.some((tx) => tx.type === "income" && tx.accountId === paydayAccountId && tx.note === marker);
+    if (exists) {
+      flash(bi(language, "Gajian bulan ini sudah tercatat di rekening itu.", "This month's payday is already recorded in that account."));
+      return;
+    }
+    const date = selectedMonth === monthKey() ? todayKey() : `${selectedMonth}-01`;
+    setTransactions((current) => [{ id: uid("tx"), date, type: "income", amount: monthlyIncome, accountId: paydayAccountId, note: marker }, ...current]);
+    const run: PaydayRun = {
+      id: uid("payday"),
+      createdAt: new Date().toISOString(),
+      income: monthlyIncome,
+      reserve: essentialReserve,
+      distributable,
+      buckets: Object.fromEntries(buckets.map((bucket) => [bucket.id, bucket.percent])) as Record<BucketId, number>,
+    };
+    setPaydayHistory((current) => [run, ...current].slice(0, 80));
+    flash(bi(language, "Gajian masuk saldo + pembagian disimpan.", "Payday added to balance + split saved."));
   }
 
   function changePercent(id: BucketId, requested: number) {
@@ -610,7 +699,7 @@ export default function MoneyApp() {
   }
 
   function exportJson() {
-    downloadBlob(JSON.stringify(currentAppState, null, 2), "application/json", `bagi-backup-${todayKey()}.json`);
+    downloadBlob(JSON.stringify(currentAppState, null, 2), "application/json", `bagi-dulu-backup-${todayKey()}.json`);
     flash(bi(language, "Backup lengkap diexport", "Full backup exported"));
   }
 
@@ -620,7 +709,7 @@ export default function MoneyApp() {
       ...transactions.map((tx) => [tx.date, tx.type, tx.amount, accountMap.get(tx.accountId)?.name || tx.accountId, tx.toAccountId ? accountMap.get(tx.toAccountId)?.name || tx.toAccountId : "", tx.categoryId ? categoryMap.get(tx.categoryId)?.name || tx.categoryId : "", tx.note]),
     ];
     const csv = rows.map((row) => row.map((value) => `"${String(value).replaceAll('"', '""')}"`).join(",")).join("\n");
-    downloadBlob(csv, "text/csv;charset=utf-8", `bagi-transactions-${todayKey()}.csv`);
+    downloadBlob(csv, "text/csv;charset=utf-8", `bagi-dulu-transactions-${todayKey()}.csv`);
     flash(bi(language, "CSV transaksi diexport", "Transactions CSV exported"));
   }
 
@@ -671,7 +760,7 @@ export default function MoneyApp() {
     setGoals(state.goals);
     setPaydayHistory([]);
     localStorage.removeItem(STORAGE_KEY);
-    localStorage.removeItem(LEGACY_STORAGE_KEY);
+    LEGACY_STORAGE_KEYS.forEach((key) => localStorage.removeItem(key));
     flash(bi(language, "BAGI balik ke nol", "BAGI reset complete"));
   }
 
@@ -694,8 +783,8 @@ export default function MoneyApp() {
       <div className="noise" aria-hidden="true" />
       <header className="topbar">
         <button className="brand brand-button" type="button" onClick={() => setTab("overview")} aria-label="BAGI overview">
-          <span className="brand-mark">B/</span>
-          <span><strong>BAGI/</strong><small>{bi(language, "uang lo, tapi lebih niat", "money, but with a plan")}</small></span>
+          <span className="brand-mark">B</span>
+          <span><strong>BAGI DULU</strong><small>{bi(language, "uang lo, tapi lebih niat", "money, but with a plan")}</small></span>
         </button>
         <div className="top-month">
           <button type="button" onClick={() => setSelectedMonth(shiftMonth(selectedMonth, -1))} aria-label={bi(language, "Bulan sebelumnya", "Previous month")}>←</button>
@@ -725,10 +814,10 @@ export default function MoneyApp() {
         <section className="page">
           <div className="overview-hero mood-hero">
             <div>
-              <span className="eyebrow">BAGI/ MONTH CHECK</span>
+              <span className="eyebrow">BAGI DULU · MONTH CHECK</span>
               <h1>{bi(language, "bulan ini ", "this month: ")}<em>{monthMood.title}</em></h1>
               <p>{monthMood.copy}</p>
-              <div className="mood-meta"><span>{bi(language, "MONEY HEALTH", "MONEY HEALTH")}</span><strong>{monthStats.healthScore}/100</strong><i>{monthStats.healthScore >= 80 ? bi(language, "rapi", "clean") : monthStats.healthScore >= 60 ? bi(language, "masih waras", "holding up") : bi(language, "butuh perhatian", "needs attention")}</i></div>
+              <div className="mood-meta"><span>{bi(language, "MONEY HEALTH", "MONEY HEALTH")}</span><strong>{monthStats.healthScore === null ? "—" : `${monthStats.healthScore}/100`}</strong><i>{monthStats.healthScore === null ? bi(language, "belum cukup data", "not enough data") : monthStats.healthScore >= 80 ? bi(language, "rapi", "clean") : monthStats.healthScore >= 60 ? bi(language, "masih waras", "holding up") : bi(language, "butuh perhatian", "needs attention")}</i></div>
             </div>
             <article className="hero-balance">
               <span>{bi(language, "uang sekarang", "money right now")}</span>
@@ -741,14 +830,14 @@ export default function MoneyApp() {
             <Metric label={bi(language, "Uang masuk", "Money in")} value={money(totals.income, language)} sub={monthLabel(selectedMonth, language)} tone="positive" />
             <Metric label={bi(language, "Uang keluar", "Money out")} value={money(totals.expense, language)} sub={`${monthTransactions.filter((t) => t.type === "expense").length} ${bi(language, "transaksi", "transactions")}`} tone="negative" />
             <Metric label={bi(language, "Sisa cashflow", "Net cashflow")} value={money(totals.net, language)} sub={totals.net >= 0 ? bi(language, "masih napas", "still breathing") : bi(language, "minus, noted", "negative, noted")} tone={totals.net >= 0 ? "positive" : "negative"} />
-            <Metric label={bi(language, "Jatah kepakai", "Budget used")} value={`${Math.round(budgetUsage)}%`} sub={`${money(spentAgainstBudget, language)} / ${money(budgetTotal, language)}`} tone={budgetUsage > 100 ? "negative" : "neutral"} />
+            <Metric label={bi(language, "Jatah kepakai", "Budget used")} value={budgetTotal > 0 ? `${Math.round(budgetUsage)}%` : "—"} sub={budgetTotal > 0 ? `${money(spentAgainstBudget, language)} / ${money(budgetTotal, language)}` : bi(language, "atur batas dulu", "set your limits first")} tone={budgetUsage > 100 ? "negative" : "neutral"} />
           </div>
 
           <div className="pulse-grid">
-            <article className="pulse-card"><span>{bi(language, "aman dibelanjain / hari", "safe to spend / day")}</span><strong>{money(monthStats.dailySafe, language)}</strong><small>{bi(language, `${monthStats.remainingDays} hari tersisa`, `${monthStats.remainingDays} days left`)}</small></article>
-            <article className="pulse-card"><span>{bi(language, "burn rate harian", "daily burn rate")}</span><strong>{money(monthStats.dailyBurn, language)}</strong><small>{bi(language, "rata-rata sejauh ini", "average so far")}</small></article>
-            <article className="pulse-card"><span>{bi(language, "hari tanpa belanja", "no-spend days")}</span><strong>{monthStats.noSpendDays}</strong><small>{bi(language, roastMode ? "small win, tetap dihitung" : "bulan ini", roastMode ? "small win, still counts" : "this month")}</small></article>
-            <article className="pulse-card"><span>{bi(language, "proyeksi keluar", "projected spend")}</span><strong>{money(monthStats.projectedSpend, language)}</strong><small>{monthStats.prevDelta === null ? bi(language, "belum ada pembanding", "no comparison yet") : `${monthStats.prevDelta >= 0 ? "+" : ""}${Math.round(monthStats.prevDelta)}% ${bi(language, "vs bulan lalu", "vs last month")}`}</small></article>
+            <article className="pulse-card"><span>{bi(language, "aman dibelanjain / hari", "safe to spend / day")}</span><strong>{budgetTotal > 0 ? money(monthStats.dailySafe, language) : "—"}</strong><small>{budgetTotal > 0 ? bi(language, `${monthStats.remainingDays} hari tersisa`, `${monthStats.remainingDays} days left`) : bi(language, "set budget dulu", "set a budget first")}</small></article>
+            <article className="pulse-card"><span>{bi(language, "burn rate harian", "daily burn rate")}</span><strong>{monthTransactions.length ? money(monthStats.dailyBurn, language) : "—"}</strong><small>{monthTransactions.length ? bi(language, "rata-rata sejauh ini", "average so far") : bi(language, "belum ada transaksi", "no transactions yet")}</small></article>
+            <article className="pulse-card"><span>{bi(language, "hari tanpa belanja", "no-spend days")}</span><strong>{monthTransactions.length ? monthStats.noSpendDays : "—"}</strong><small>{monthTransactions.length ? bi(language, roastMode ? "small win, tetap dihitung" : "bulan ini", roastMode ? "small win, still counts" : "this month") : bi(language, "mulai catat dulu", "start tracking first")}</small></article>
+            <article className="pulse-card"><span>{bi(language, "proyeksi keluar", "projected spend")}</span><strong>{monthTransactions.length ? money(monthStats.projectedSpend, language) : "—"}</strong><small>{!monthTransactions.length ? bi(language, "belum cukup data", "not enough data") : monthStats.prevDelta === null ? bi(language, "belum ada pembanding", "no comparison yet") : `${monthStats.prevDelta >= 0 ? "+" : ""}${Math.round(monthStats.prevDelta)}% ${bi(language, "vs bulan lalu", "vs last month")}`}</small></article>
           </div>
 
           <div className="dashboard-grid">
@@ -766,7 +855,7 @@ export default function MoneyApp() {
           <div className="dashboard-grid lower">
             <article className="panel">
               <div className="panel-head"><div><span className="eyebrow">{bi(language, "JATAH HIDUP", "BUDGET CHECK")}</span><h2>{bi(language, "berapa yang udah kepake.", "what's already gone.")}</h2></div><button className="text-btn" type="button" onClick={() => setTab("analytics")}>{bi(language, "Bedah →", "Details →")}</button></div>
-              <div className="budget-list compact">{activeCategories.slice(0, 6).map((category) => { const spent = categorySpend[category.id] || 0; const pct = category.monthlyLimit > 0 ? (spent / category.monthlyLimit) * 100 : 0; return <BudgetBar key={category.id} name={category.name} spent={spent} limit={category.monthlyLimit} percent={pct} language={language} />; })}</div>
+              {budgetTotal > 0 ? <div className="budget-list compact">{activeCategories.slice(0, 6).map((category) => { const spent = categorySpend[category.id] || 0; const pct = category.monthlyLimit > 0 ? (spent / category.monthlyLimit) * 100 : 0; return <BudgetBar key={category.id} name={category.name} spent={spent} limit={category.monthlyLimit} percent={pct} language={language} />; })}</div> : <p className="muted-empty">{bi(language, "Belum ada jatah bulanan. Atur batas kategori dulu biar radar budget mulai kerja.", "No monthly limits yet. Set category budgets first so the budget radar can do its thing.")}</p>}
             </article>
 
             <article className="panel">
@@ -782,8 +871,8 @@ export default function MoneyApp() {
           <div className="section-heading first-heading"><div><span className="eyebrow">{bi(language, "GAJIAN TURUN", "PAYDAY MODE")}</span><h1 className="page-title">{bi(language, "bagi dulu sebelum hilang sendiri.", "split it before it disappears.")}</h1></div><p>{bi(language, "Sisihin yang wajib, kasih tujuan ke sisanya, baru silakan hidup.", "Cover the essentials, give the rest a job, then go live your life.")}</p></div>
 
           <div className="payday-hero">
-            <label className="big-input"><span>{bi(language, "Uang masuk bulan ini", "Monthly take-home")}</span><div><b>Rp</b><input type="number" min={0} step={50_000} value={monthlyIncome} onChange={(e) => setMonthlyIncome(Math.max(0, Number(e.target.value) || 0))} /></div></label>
-            <label className="big-input"><span>{bi(language, "Yang wajib jangan diganggu", "Essentials reserve")}</span><div><b>Rp</b><input type="number" min={0} step={50_000} value={essentialReserve} onChange={(e) => setEssentialReserve(Math.max(0, Number(e.target.value) || 0))} /></div></label>
+            <label className="big-input"><span>{bi(language, "Uang masuk bulan ini", "Monthly take-home")}</span><div><b>Rp</b><input type="number" min={0} step={50_000} placeholder="0" value={monthlyIncome || ""} onChange={(e) => changeMonthlyIncome(e.target.value)} /></div><small>{bi(language, "Begitu diketik, semua nominal pembagian langsung ikut berubah.", "Every allocation updates instantly as you type.")}</small></label>
+            <label className="big-input"><span>{bi(language, "Yang wajib dulu · opsional", "Essentials reserve · optional")}</span><div><b>Rp</b><input type="number" min={0} max={monthlyIncome || undefined} step={50_000} placeholder="0" value={essentialReserve || ""} onChange={(e) => changeEssentialReserve(e.target.value)} /></div><small>{bi(language, "Nggak bisa lebih besar dari uang masuk. Jadi nggak ada lagi Rp0 misterius.", "Never exceeds your income, so no more mystery Rp0.")}</small></label>
             <article className="distributable-card"><span>{bi(language, "siap dibagi", "ready to split")}</span><strong>{money(distributable, language)}</strong><small>{monthlyIncome > 0 ? `${Math.round((distributable / monthlyIncome) * 100)}% ${bi(language, "dari pemasukan", "of income")}` : "0%"}</small></article>
           </div>
 
@@ -797,7 +886,7 @@ export default function MoneyApp() {
           ))}</div>
 
           <div className="summary-panel"><div><span>{bi(language, "Jangan disentuh", "Do not touch")}</span><strong>{money(allocation.emergency, language)}</strong></div><div><span>{bi(language, "Lagi ngejar", "Goals")}</span><strong>{money(allocation.goals, language)}</strong></div><div><span>{bi(language, "Boleh khilaf", "Fun money")}</span><strong>{money(plannedFun, language)}</strong></div><div><span>{bi(language, "Buat nanti", "Planned savings")}</span><strong>{money(plannedSavings, language)}</strong></div></div>
-          <div className="payday-actions"><button className="primary-btn" type="button" onClick={commitPayday}>{bi(language, "SIMPAN PEMBAGIAN", "SAVE SPLIT")}</button><small>{bi(language, "Ini snapshot rencana. Saldo rekening nggak berubah otomatis.", "This saves a planning snapshot. Account balances are not changed automatically.")}</small></div>
+          <div className="payday-actions payday-actions-v4"><button className="primary-btn" type="button" onClick={commitPayday}>{bi(language, "SIMPAN RENCANA", "SAVE PLAN")}</button><div className="payday-record"><select aria-label={bi(language, "Rekening tujuan gajian", "Payday destination account")} value={paydayAccountId} onChange={(e) => setPaydayAccountId(e.target.value)}>{activeAccounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</select><button className="ghost-btn" type="button" disabled={!activeAccounts.length || monthlyIncome <= 0} onClick={recordPaydayToBalance}>{bi(language, "CATAT GAJIAN KE SALDO", "ADD PAYDAY TO BALANCE")}</button></div><small>{bi(language, "Pembagian di atas adalah rencana. Kalau mau angka di Bulan Ini ikut berubah, catat gajian ke saldo.", "The split above is a plan. To update This Month and your balance, add payday to an account.")}</small></div>
 
           {paydayHistory.length > 0 && <div className="history-list compact-history"><div className="panel-head"><div><span className="eyebrow">{bi(language, "RIWAYAT GAJIAN", "PAYDAY HISTORY")}</span><h2>{bi(language, "pernah dibagi begini.", "recent splits.")}</h2></div></div>{paydayHistory.slice(0, 6).map((run) => <article className="history-card" key={run.id}><div><span>{new Intl.DateTimeFormat(language === "id" ? "id-ID" : "en-US", { dateStyle: "medium", timeStyle: "short" }).format(new Date(run.createdAt))}</span><strong>{money(run.distributable, language)} {bi(language, "dibagi", "split")}</strong></div><div className="history-pills"><i>E {run.buckets.emergency}%</i><i>G {run.buckets.goals}%</i><i>N {run.buckets.hangout}%</i><i>I {run.buckets.impulse}%</i></div><div className="history-actions"><button type="button" onClick={() => setPaydayHistory((current) => current.filter((x) => x.id !== run.id))}>{bi(language, "Hapus", "Delete")}</button></div></article>)}</div>}
         </section>
@@ -817,7 +906,7 @@ export default function MoneyApp() {
 
       {tab === "goals" && (
         <section className="page">
-          <div className="section-heading first-heading"><div><span className="eyebrow">{bi(language, "LAGI NGEJAR", "GOAL ENGINE")}</span><h1 className="page-title">{bi(language, "future you lagi nabung.", "make future money visible.")}</h1></div><button className="primary-btn" type="button" onClick={() => setGoals((current) => [...current, { id: uid("goal"), name: bi(language, "Target Baru", "New Goal"), kind: "goal", current: 0, target: 1_000_000, monthlyContribution: 250_000, targetDate: "", priority: "medium" }])}>{bi(language, "+ TAMBAH TARGET", "+ ADD GOAL")}</button></div>
+          <div className="section-heading first-heading"><div><span className="eyebrow">{bi(language, "LAGI NGEJAR", "GOAL ENGINE")}</span><h1 className="page-title">{bi(language, "future you lagi nabung.", "make future money visible.")}</h1></div><button className="primary-btn" type="button" onClick={() => setGoals((current) => [...current, { id: uid("goal"), name: bi(language, "Target Baru", "New Goal"), kind: "goal", current: 0, target: 0, monthlyContribution: 0, targetDate: "", priority: "medium" }])}>{bi(language, "+ TAMBAH TARGET", "+ ADD GOAL")}</button></div>
           <div className="goal-grid">{goals.map((goal) => <GoalCard key={goal.id} goal={goal} onChange={(next) => setGoals((current) => current.map((item) => item.id === goal.id ? next : item))} onDelete={goal.kind === "emergency" ? undefined : () => setGoals((current) => current.filter((item) => item.id !== goal.id))} language={language} />)}</div>
         </section>
       )}
@@ -841,7 +930,7 @@ export default function MoneyApp() {
 
       {tab === "settings" && (
         <section className="page">
-          <div className="section-heading first-heading"><div><span className="eyebrow">BAGI/ SYSTEM</span><h1 className="page-title">{bi(language, "atur yang ngatur uang.", "control the control panel.")}</h1></div><p>{bi(language, "Bahasa, personality, rekening, budget, backup, dan cloud. Semua yang nerdy ada di sini.", "Language, personality, accounts, budgets, backup, and cloud. All the nerdy stuff lives here.")}</p></div>
+          <div className="section-heading first-heading"><div><span className="eyebrow">BAGI DULU · SYSTEM</span><h1 className="page-title">{bi(language, "atur yang ngatur uang.", "control the control panel.")}</h1></div><p>{bi(language, "Bahasa, personality, rekening, budget, backup, dan cloud. Semua yang nerdy ada di sini.", "Language, personality, accounts, budgets, backup, and cloud. All the nerdy stuff lives here.")}</p></div>
           <div className="settings-grid wide-settings">
             <article className="settings-card personality-card"><h2>{bi(language, "Bahasa & personality", "Language & personality")}</h2><p>{bi(language, "Dua bahasa. Satu dompet. Humor bisa dimatiin kalau lagi pengen serius.", "Two languages. One wallet. Turn the jokes off when you need the app to behave.")}</p><div className="settings-choice"><span>{bi(language, "Bahasa", "Language")}</span><div className="lang-toggle large"><button type="button" className={language === "id" ? "active" : ""} onClick={() => setLanguage("id")}>Indonesia</button><button type="button" className={language === "en" ? "active" : ""} onClick={() => setLanguage("en")}>English</button></div></div><div className="settings-choice"><span>{bi(language, "Roast mode", "Roast mode")}</span><button className={roastMode ? "status-btn active" : "status-btn"} type="button" onClick={() => setRoastMode((value) => !value)}>{roastMode ? bi(language, "NYALA", "ON") : bi(language, "TENANG", "OFF")}</button></div></article>
             <AccountSettings accounts={accounts} balances={balances} onChange={setAccounts} language={language} />
@@ -855,7 +944,7 @@ export default function MoneyApp() {
         </section>
       )}
 
-      <footer className="footer"><span>BAGI/ V3.0</span><p>{bi(language, "money, before it disappears · local-first · bilingual · PWA-ready", "money, before it disappears · local-first · bilingual · PWA-ready")}</p></footer>
+      <footer className="footer"><span>BAGI DULU V4.0</span><p>{bi(language, "money, before it disappears · local-first · bilingual · PWA-ready", "money, before it disappears · local-first · bilingual · PWA-ready")}</p></footer>
       <div className={toast ? "toast show" : "toast"} role="status" aria-live="polite">{toast}</div>
     </main>
   );
@@ -950,14 +1039,14 @@ function GoalCard({ goal, onChange, onDelete, language }: { goal: Goal; onChange
   const [contribution, setContribution] = useState("");
   const progress = goal.target > 0 ? clamp((goal.current / goal.target) * 100, 0, 100) : 0;
   const remaining = Math.max(0, goal.target - goal.current);
-  const eta = remaining === 0 ? 0 : goal.monthlyContribution > 0 ? Math.ceil(remaining / goal.monthlyContribution) : null;
+  const eta = goal.target <= 0 ? null : remaining === 0 ? 0 : goal.monthlyContribution > 0 ? Math.ceil(remaining / goal.monthlyContribution) : null;
   function addContribution() {
     const amount = Math.max(0, Number(contribution) || 0);
     if (!amount) return;
     onChange({ ...goal, current: goal.current + amount });
     setContribution("");
   }
-  return <article className="goal-card"><div className="goal-card-head"><div><span className="eyebrow">{goal.kind === "emergency" ? bi(language, "JANGAN DISENTUH", "DO NOT TOUCH") : goal.priority.toUpperCase()}</span><input className="goal-title-input" value={goal.name} onChange={(e) => onChange({ ...goal, name: e.target.value.slice(0, 50) })} /></div><strong>{Math.round(progress)}%</strong></div><div className="progress-track"><i style={{ width: `${progress}%` }} /></div><div className="goal-amount"><strong>{money(goal.current, language)}</strong><span>{bi(language, "dari", "of")} {money(goal.target, language)}</span></div><div className="goal-fields"><label><span>Target</span><input type="number" min={0} value={goal.target} onChange={(e) => onChange({ ...goal, target: Math.max(0, Number(e.target.value) || 0) })} /></label><label><span>{bi(language, "Plan / bulan", "Monthly plan")}</span><input type="number" min={0} value={goal.monthlyContribution} onChange={(e) => onChange({ ...goal, monthlyContribution: Math.max(0, Number(e.target.value) || 0) })} /></label><label><span>{bi(language, "Tanggal target", "Target date")}</span><input type="date" value={goal.targetDate} onChange={(e) => onChange({ ...goal, targetDate: e.target.value })} /></label><label><span>{bi(language, "Prioritas", "Priority")}</span><select value={goal.priority} onChange={(e) => onChange({ ...goal, priority: e.target.value as Goal["priority"] })}><option value="high">{bi(language, "Tinggi", "High")}</option><option value="medium">{bi(language, "Sedang", "Medium")}</option><option value="low">{bi(language, "Santai", "Low")}</option></select></label></div><div className="goal-contribution"><input type="number" min={0} placeholder={bi(language, "tambah tabungan", "add contribution")} value={contribution} onChange={(e) => setContribution(e.target.value)} /><button className="primary-btn" type="button" onClick={addContribution}>+ {bi(language, "TAMBAH", "ADD")}</button></div><div className="goal-footer"><span>{bi(language, "Kurang", "Remaining")} <b>{money(remaining, language)}</b></span><span>ETA <b>{eta === null ? "∞" : eta === 0 ? bi(language, "BERES", "DONE") : `${eta} ${bi(language, "bln", "mo")}`}</b></span>{onDelete && <button type="button" onClick={onDelete}>{bi(language, "Hapus target", "Delete goal")}</button>}</div></article>;
+  return <article className="goal-card"><div className="goal-card-head"><div><span className="eyebrow">{goal.kind === "emergency" ? bi(language, "JANGAN DISENTUH", "DO NOT TOUCH") : goal.priority.toUpperCase()}</span><input className="goal-title-input" value={goal.name} onChange={(e) => onChange({ ...goal, name: e.target.value.slice(0, 50) })} /></div><strong>{Math.round(progress)}%</strong></div><div className="progress-track"><i style={{ width: `${progress}%` }} /></div><div className="goal-amount"><strong>{money(goal.current, language)}</strong><span>{bi(language, "dari", "of")} {money(goal.target, language)}</span></div><div className="goal-fields"><label><span>Target</span><input type="number" min={0} value={goal.target} onChange={(e) => onChange({ ...goal, target: Math.max(0, Number(e.target.value) || 0) })} /></label><label><span>{bi(language, "Plan / bulan", "Monthly plan")}</span><input type="number" min={0} value={goal.monthlyContribution} onChange={(e) => onChange({ ...goal, monthlyContribution: Math.max(0, Number(e.target.value) || 0) })} /></label><label><span>{bi(language, "Tanggal target", "Target date")}</span><input type="date" value={goal.targetDate} onChange={(e) => onChange({ ...goal, targetDate: e.target.value })} /></label><label><span>{bi(language, "Prioritas", "Priority")}</span><select value={goal.priority} onChange={(e) => onChange({ ...goal, priority: e.target.value as Goal["priority"] })}><option value="high">{bi(language, "Tinggi", "High")}</option><option value="medium">{bi(language, "Sedang", "Medium")}</option><option value="low">{bi(language, "Santai", "Low")}</option></select></label></div><div className="goal-contribution"><input type="number" min={0} placeholder={bi(language, "tambah tabungan", "add contribution")} value={contribution} onChange={(e) => setContribution(e.target.value)} /><button className="primary-btn" type="button" onClick={addContribution}>+ {bi(language, "TAMBAH", "ADD")}</button></div><div className="goal-footer"><span>{bi(language, "Kurang", "Remaining")} <b>{money(remaining, language)}</b></span><span>ETA <b>{goal.target <= 0 ? bi(language, "SET TARGET", "SET TARGET") : eta === null ? "∞" : eta === 0 ? bi(language, "BERES", "DONE") : `${eta} ${bi(language, "bln", "mo")}`}</b></span>{onDelete && <button type="button" onClick={onDelete}>{bi(language, "Hapus target", "Delete goal")}</button>}</div></article>;
 }
 
 function RecurringComposer({ accounts, categories, onAdd, language }: { accounts: Account[]; categories: Category[]; onAdd: (rule: RecurringRule) => void; language: Language }) {

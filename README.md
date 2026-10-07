@@ -1,10 +1,10 @@
-# BAGI/ — Money, Before It Disappears
+# BAGI DULU — Money, Before It Disappears
 
-**BAGI/** is a bilingual, local-first personal finance OS with a little personality. It helps you split payday, set budgets, track money moves, build goals, manage recurring money, and see whether this month is still financially alive.
+**BAGI DULU** is a bilingual, local-first personal finance OS with a little personality. It helps you split payday, set budgets, track money moves, build goals, manage recurring money, and see whether this month is still financially alive.
 
 > Personal finance for people who do not want their money app to feel like homework.
 
-## V3 highlights
+## V4 highlights
 
 - **Bahasa Indonesia + English** toggle from the top bar or Settings
 - **Roast Mode**: optional dry / Gen-Z copy that can be turned off when you want the app to behave
@@ -14,7 +14,7 @@
 - **No-spend day counter**
 - **Month-over-month expense delta**
 - **Transaction search + type filters**
-- Existing BAGI V2 local data automatically migrates to V3
+- Existing BAGI V2 local data automatically migrates to V4
 
 ## Core features
 
@@ -46,7 +46,7 @@
 
 ## Brand direction
 
-BAGI/ is intentionally not written like a bank app.
+BAGI DULU is intentionally not written like a bank app.
 
 Indonesian UI examples:
 
@@ -87,7 +87,7 @@ npm run build
 ```bash
 git init
 git add .
-git commit -m "feat: BAGI V3"
+git commit -m "feat: BAGI V4"
 git branch -M main
 git remote add origin https://github.com/YOUR_USERNAME/bagi.git
 git push -u origin main
@@ -130,19 +130,19 @@ The supplied `supabase/schema.sql` enables Row Level Security so authenticated u
 
 ## Local data and migration
 
-V3 uses:
+V4 uses:
 
 ```text
-bagi-finance-os-v3
+bagi-finance-os-v4
 ```
 
-If V3 does not find that key, it also checks the old V2 key:
+If V4 does not find that key, it also checks the old V2 key:
 
 ```text
 bagi-finance-os-v2
 ```
 
-The old state is normalized into the V3 schema automatically, adding language and Roast Mode defaults without deleting the user's finance data.
+The old state is normalized into the V4 schema automatically, adding language and Roast Mode defaults without deleting the user's finance data.
 
 ## Privacy
 

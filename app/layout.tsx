@@ -2,8 +2,8 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "BAGI/ — Money, Before It Disappears",
-  description: "A bilingual, local-first personal finance OS for splitting payday, tracking spending, planning goals, and finding out where the money went.",
+  title: "BAGI DULU — Money, Before It Disappears",
+  description: "A bilingual, local-first personal finance app for splitting payday, tracking spending, planning goals, and finding out where the money went.",
   manifest: "/manifest.webmanifest",
   icons: { icon: "/icon.svg" },
 };
