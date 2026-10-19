@@ -1,10 +1,12 @@
 "use client";
 
 import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import SplitBillPanel from "./SplitBillPanel";
+import { SplitBill, newBill, normalizeBill } from "../lib/splitbill";
 
 type Theme = "dark" | "light";
 type Language = "id" | "en";
-type Tab = "overview" | "payday" | "transactions" | "goals" | "recurring" | "analytics" | "settings";
+type Tab = "splitbill" | "overview" | "payday" | "transactions" | "goals" | "recurring" | "analytics" | "settings";
 type TxType = "income" | "expense" | "transfer";
 type AccountKind = "bank" | "cash" | "ewallet" | "savings";
 type GoalKind = "emergency" | "goal";
@@ -79,7 +81,7 @@ type PaydayRun = {
 };
 
 type AppState = {
-  version: 5;
+  version: 6;
   theme: Theme;
   language: Language;
   roastMode: boolean;
@@ -93,10 +95,12 @@ type AppState = {
   recurring: RecurringRule[];
   goals: Goal[];
   paydayHistory: PaydayRun[];
+  splitDraft: SplitBill;
+  splitBills: SplitBill[];
 };
 
-const STORAGE_KEY = "bagi-finance-os-v5";
-const LEGACY_STORAGE_KEYS = ["bagi-finance-os-v4", "bagi-finance-os-v3", "bagi-finance-os-v2"];
+const STORAGE_KEY = "bagi-finance-os-v6";
+const LEGACY_STORAGE_KEYS = ["bagi-finance-os-v5", "bagi-finance-os-v4", "bagi-finance-os-v3", "bagi-finance-os-v2"];
 const CLOUD_SESSION_KEY = "bagi-cloud-session-v1";
 
 const DEFAULT_BUCKETS: Bucket[] = [];
@@ -346,7 +350,7 @@ function distributeInteger(total: number, source: Bucket[]) {
 
 function baseState(): AppState {
   return {
-    version: 5,
+    version: 6,
     theme: "dark",
     language: "id",
     roastMode: true,
@@ -360,6 +364,8 @@ function baseState(): AppState {
     recurring: [],
     goals: DEFAULT_GOALS,
     paydayHistory: [],
+    splitDraft: newBill(),
+    splitBills: [],
   };
 }
 
@@ -462,7 +468,7 @@ function normalizeState(input: Partial<AppState>): AppState | null {
     normalizedReserve = normalizedMonthlyIncome > 0 ? Math.min(normalizedReserve, normalizedMonthlyIncome) : 0;
 
     return {
-      version: 5,
+      version: 6,
       theme: input.theme === "light" ? "light" : "dark",
       language: input.language === "en" ? "en" : "id",
       roastMode: input.roastMode !== false,
@@ -476,6 +482,8 @@ function normalizeState(input: Partial<AppState>): AppState | null {
       recurring,
       goals,
       paydayHistory,
+      splitDraft: normalizeBill(input.splitDraft) || newBill(),
+      splitBills: Array.isArray(input.splitBills) ? input.splitBills.slice(0, 40).map(normalizeBill).filter((b): b is SplitBill => b !== null) : [],
     };
   } catch {
     return null;
@@ -498,6 +506,8 @@ export default function MoneyApp() {
   const [recurring, setRecurring] = useState<RecurringRule[]>(defaults.recurring);
   const [goals, setGoals] = useState<Goal[]>(defaults.goals);
   const [paydayHistory, setPaydayHistory] = useState<PaydayRun[]>(defaults.paydayHistory);
+  const [splitDraft, setSplitDraft] = useState<SplitBill>(defaults.splitDraft);
+  const [splitBills, setSplitBills] = useState<SplitBill[]>(defaults.splitBills);
   const [toast, setToast] = useState("");
   const [hydrated, setHydrated] = useState(false);
   const [dayFilter, setDayFilter] = useState<number | null>(null);
@@ -507,8 +517,8 @@ export default function MoneyApp() {
   const importRef = useRef<HTMLInputElement>(null);
 
   const currentAppState = useMemo<AppState>(() => ({
-    version: 5, theme, language, roastMode, selectedMonth, monthlyIncome, essentialReserve, buckets, accounts, categories, transactions, recurring, goals, paydayHistory,
-  }), [theme, language, roastMode, selectedMonth, monthlyIncome, essentialReserve, buckets, accounts, categories, transactions, recurring, goals, paydayHistory]);
+    version: 6, theme, language, roastMode, selectedMonth, monthlyIncome, essentialReserve, buckets, accounts, categories, transactions, recurring, goals, paydayHistory, splitDraft, splitBills,
+  }), [theme, language, roastMode, selectedMonth, monthlyIncome, essentialReserve, buckets, accounts, categories, transactions, recurring, goals, paydayHistory, splitDraft, splitBills]);
 
   useEffect(() => {
     try {
@@ -529,6 +539,8 @@ export default function MoneyApp() {
           setRecurring(saved.recurring);
           setGoals(saved.goals);
           setPaydayHistory(saved.paydayHistory);
+          setSplitDraft(saved.splitDraft);
+          setSplitBills(saved.splitBills);
         }
       }
     } catch {
@@ -548,7 +560,7 @@ export default function MoneyApp() {
 
   useEffect(() => {
     if (!hydrated) return;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(currentAppState));
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(currentAppState)); } catch { setToast(bi(currentAppState.language, "Penyimpanan perangkat penuh atau tidak tersedia. Export backup sebelum menutup.", "Device storage is full or unavailable. Export a backup before closing.")); }
   }, [hydrated, currentAppState]);
 
   useEffect(() => {
@@ -897,6 +909,8 @@ export default function MoneyApp() {
     setRecurring(state.recurring);
     setGoals(state.goals);
     setPaydayHistory(state.paydayHistory);
+    setSplitDraft(state.splitDraft);
+    setSplitBills(state.splitBills);
   }
 
   function resetAll() {
@@ -915,6 +929,8 @@ export default function MoneyApp() {
     setRecurring([]);
     setGoals(state.goals);
     setPaydayHistory([]);
+    setSplitDraft(state.splitDraft);
+    setSplitBills([]);
     localStorage.removeItem(STORAGE_KEY);
     LEGACY_STORAGE_KEYS.forEach((key) => localStorage.removeItem(key));
     flash(bi(language, "BAGI balik ke nol", "BAGI reset complete"));
@@ -936,6 +952,7 @@ export default function MoneyApp() {
     { id: "overview", label: "Overview" },
     { id: "payday", label: "Payday" },
     { id: "transactions", label: "Transactions" },
+    { id: "splitbill", label: "Split Bill" },
     { id: "goals", label: "Goals" },
     { id: "recurring", label: "Recurring" },
     { id: "analytics", label: "Analytics" },
@@ -968,7 +985,7 @@ export default function MoneyApp() {
       <nav className="tabs" aria-label={bi(language, "Bagian aplikasi", "App sections")}>
         {navigation.map((item) => {
           const labels: Record<Tab, [string, string]> = {
-            overview: ["Bulan Ini", "This Month"], payday: ["Bagi Gajian", "Payday"], transactions: ["Uangnya Ke Mana?", "Money Moves"], goals: ["Lagi Ngejar", "Goals"], recurring: ["Datang Lagi", "Recurring"], analytics: ["Cek Pola", "Patterns"], settings: ["Atur", "Settings"],
+            splitbill: ["Patungan", "Split Bill"], overview: ["Bulan Ini", "This Month"], payday: ["Bagi Gajian", "Payday"], transactions: ["Uangnya Ke Mana?", "Money Moves"], goals: ["Lagi Ngejar", "Goals"], recurring: ["Datang Lagi", "Recurring"], analytics: ["Cek Pola", "Patterns"], settings: ["Atur", "Settings"],
           };
           return <button key={item.id} className={tab === item.id ? "tab active" : "tab"} type="button" onClick={() => setTab(item.id)}>{bi(language, labels[item.id][0], labels[item.id][1])}</button>;
         })}
@@ -1061,6 +1078,8 @@ export default function MoneyApp() {
         </section>
       )}
 
+      {tab === "splitbill" && <SplitBillPanel language={language} draft={splitDraft} onDraft={setSplitDraft} history={splitBills} onHistory={setSplitBills} flash={flash} />}
+
       {tab === "transactions" && (
         <section className="page">
           <div className="section-heading first-heading"><div><span className="eyebrow">{bi(language, "UANGNYA KE MANA?", "MONEY MOVES")}</span><h1 className="page-title">{bi(language, "semua masuk-keluar ada jejaknya.", "every in and out, in one place.")}</h1></div><p>{bi(language, "Catat sekali, biar akhir bulan nggak perlu nebak-nebak.", "Track it once so month-end is not a guessing game.")}</p></div>
@@ -1112,7 +1131,7 @@ export default function MoneyApp() {
         </section>
       )}
 
-      <footer className="footer"><span>BAGI DULU V5.0</span><p>{bi(language, "money, before it disappears · local-first · bilingual · PWA-ready", "money, before it disappears · local-first · bilingual · PWA-ready")}</p></footer>
+      <footer className="footer"><span>BAGI DULU V6.0</span><p>{bi(language, "money, before it disappears · local-first · bilingual · PWA-ready", "money, before it disappears · local-first · bilingual · PWA-ready")}</p></footer>
       <div className={toast ? "toast show" : "toast"} role="status" aria-live="polite">{toast}</div>
     </main>
   );

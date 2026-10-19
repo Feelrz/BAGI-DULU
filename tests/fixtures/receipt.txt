@@ -1,0 +1,15 @@
+WARUNG UJI BAGI
+CONTOH STRUK / BUKAN TRANSAKSI
+
+Nasi Goreng 2 x 25.000 50.000
+Es Teh      2 x  5.000 10.000
+Kentang Goreng         20.000
+
+Subtotal               80.000
+Diskon 10%              8.000
+Service 5%              3.600
+Pajak 10%               7.200
+TOTAL                  82.800
+
+Cash                  100.000
+Kembalian              17.200

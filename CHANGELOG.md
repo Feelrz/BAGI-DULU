@@ -1,3 +1,14 @@
+# V6.0.0 — 2026-10-19
+
+- Added PATUNGAN / SPLIT BILL with real on-device receipt OCR and manual entry.
+- Added camera, phone capture fallback, photo upload, progress, cancellation, and editable review.
+- Added equal/per-item sharing, shared dishes, discount, service, tax, optional service-tax base, other fees, reconciliation, upfront payer, and exact integer allocations.
+- Added autosaved draft, saved history, bilingual copy, responsive styling, and clipboard summary.
+- Extended migration, backup/import, cloud state, and reset to include split bills.
+- Bundled self-hosted OCR assets at build time; no API keys or receipt upload.
+- Restricted service-worker caching to same-origin static assets/pages; avoids caching cloud/auth requests and returning HTML as a worker/script fallback.
+- Added parser/calculation tests and a synthetic receipt OCR smoke test.
+
 # Changelog
 
 ## 5.0.0

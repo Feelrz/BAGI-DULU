@@ -4,7 +4,24 @@
 
 > Personal finance for people who do not want their money app to feel like homework.
 
-## V5 highlights
+## V6 — PATUNGAN / SPLIT BILL
+
+- New **PATUNGAN / SPLIT BILL** tab, matching the existing dark/light BAGI UI and ID/EN switch.
+- Camera capture, native phone-camera fallback, and gallery photo input.
+- Real on-device OCR with Tesseract.js 7.0.0. No paid OCR API or secret key.
+- Editable receipt items, quantities, **line totals**, tax, service, discount, and expected total.
+- Manual item entry or quick total-only equal splitting.
+- Equal splitting or participant selection per item, including shared dishes.
+- Proportional fees, configurable tax base, and exact whole-rupiah allocation.
+- Mismatch warnings and explicit scanned-receipt review before saving or copying.
+- Single upfront payer and a repayment breakdown; copy detailed results for chat.
+- Autosaved draft and 40 saved bills, included in JSON backup and optional existing cloud sync.
+- Automatic migration from V5/V4/V3/V2. The V5 key remains available until an explicit full reset.
+- Camera tracks and OCR workers released when closing, cancelling, or leaving the tab.
+
+**See [PANDUAN-UPDATE-V6.md](PANDUAN-UPDATE-V6.md) for Indonesian setup and usage.**
+
+## V5 features retained
 
 - **Bahasa Indonesia + English** toggle from the top bar or Settings
 - **Roast Mode**: optional dry / Gen-Z copy that can be turned off when you want the app to behave
@@ -94,7 +111,7 @@ npm run build
 ```bash
 git init
 git add .
-git commit -m "feat: BAGI V4"
+git commit -m "feat: BAGI V6 split bill"
 git branch -M main
 git remote add origin https://github.com/YOUR_USERNAME/bagi.git
 git push -u origin main
@@ -137,19 +154,37 @@ The supplied `supabase/schema.sql` enables Row Level Security so authenticated u
 
 ## Local data and migration
 
-V4 uses:
+V6 writes to `bagi-finance-os-v6`. On first load, it checks V5, V4, V3, and V2 if no V6 data exists. Existing finance data is normalized into V6 and split-bill fields are added. Export a full JSON backup from the existing app before updating.
 
-```text
-bagi-finance-os-v4
+The original V5 data is not deleted during migration. JSON export/import and optional Supabase push/pull include the split-bill draft and history. Receipt photos and raw OCR text only stay in the current tab session; they are not saved in backups.
+
+## Receipt scanning implementation
+
+`predev` and `prebuild` run `scripts/prepare-ocr.mjs`. This copies the pinned worker, WebAssembly variants, and English Latin-character recognition model from npm packages into `public/ocr`. The app lazy-loads its scanner and serves OCR assets from its own origin. The photo itself stays in browser memory and is passed to a local Web Worker; no recognition request or receipt photo goes to a third-party server.
+
+Manual entry is available without an OCR service. First use of the scanner needs a connection to load its assets. Browser caches may allow later use without internet, but offline OCR is not guaranteed if storage is cleared or unavailable. Camera access requires HTTPS or localhost and browser permission. A native capture input and file upload remain available when the live camera is unsupported or denied.
+
+Supported input: decodable images, up to 20 MB. The app reduces images to a maximum 2600-pixel longest edge before OCR. HEIC support depends on the browser; use JPG/PNG or a fresh camera photo if decoding fails. PDFs are not supported. Clear, straight receipts with Latin text and prices work best. Unusual layouts, item-level discounts, inclusive tax, handwritten or blurry receipts may require manual correction. Quantities are metadata: **line total already includes quantity and must not be multiplied again**.
+
+All OCR results require human review. The parser uses the final amount on each item line, recognizes common Indonesian/English monetary separators, ignores payment/change rows, and extracts common totals. It does not guarantee perfect parsing. A supplied expected total must reconcile exactly before save/copy. Use explicit charge amounts where the receipt uses tax or discount rules outside the supported basis.
+
+Bills calculate shares and repayments only; they do not transfer funds, confirm real payments, or automatically add transactions to the personal-finance ledger.
+
+Technical references:
+- https://github.com/naptha/tesseract.js/blob/master/docs/api.md
+- https://github.com/naptha/tesseract.js/blob/master/docs/local-installation.md
+- https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Attributes/capture
+
+## Validation
+
+```bash
+npm ci
+npm test
+npm run build
+node tests/ocr-smoke.mjs
 ```
 
-If V4 does not find that key, it also checks the old V2 key:
-
-```text
-bagi-finance-os-v2
-```
-
-The old state is normalized into the V4 schema automatically, adding language and Roast Mode defaults without deleting the user's finance data.
+The OCR smoke test uses the deliberately synthetic `tests/fixtures/CONTOH-STRUK.png`. Run the build first to prepare recognition assets. TypeScript and production compilation, 15 groups of calculation/parser tests (including 1000 allocation cases), and actual image OCR passed during preparation. Physical camera permissions, real-device browser interactions, and mobile layout have not been tested in this environment.
 
 ## Privacy
 

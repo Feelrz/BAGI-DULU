@@ -1,17 +1,22 @@
 {
   "name": "bagi-personal-finance-os",
-  "version": "5.0.0",
+  "version": "6.0.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "predev": "node scripts/prepare-ocr.mjs",
+    "prebuild": "node scripts/prepare-ocr.mjs",
+    "test": "node tests/splitbill.test.mjs"
   },
   "dependencies": {
+    "@tesseract.js-data/eng": "1.0.0",
     "next": "16.3.8",
     "react": "19.2.0",
-    "react-dom": "19.2.0"
+    "react-dom": "19.2.0",
+    "tesseract.js": "7.0.0"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
@@ -19,5 +24,5 @@
     "@types/react-dom": "^19.0.0",
     "typescript": "^5.7.0"
   },
-  "description": "BAGI DULU \u2014 bilingual local-first personal finance app with custom payday buckets, Indonesian bank picker, budgets, goals, recurring money, analytics, and optional cloud sync."
+  "description": "BAGI DULU — bilingual local-first personal finance app with custom payday buckets, Indonesian bank picker, budgets, goals, recurring money, analytics, and optional cloud sync. Receipt scanning and manual split bills."
 }
