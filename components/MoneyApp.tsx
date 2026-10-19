@@ -1131,7 +1131,7 @@ export default function MoneyApp() {
         </section>
       )}
 
-      <footer className="footer"><span>BAGI DULU V6.0</span><p>{bi(language, "money, before it disappears · local-first · bilingual · PWA-ready", "money, before it disappears · local-first · bilingual · PWA-ready")}</p></footer>
+      <footer className="footer"><span>BAGI DULU V6.0.1</span><p>{bi(language, "money, before it disappears · local-first · bilingual · PWA-ready", "money, before it disappears · local-first · bilingual · PWA-ready")}</p></footer>
       <div className={toast ? "toast show" : "toast"} role="status" aria-live="polite">{toast}</div>
     </main>
   );

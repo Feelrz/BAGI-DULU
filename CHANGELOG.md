@@ -1,3 +1,12 @@
+# V6.0.1 — 2026-10-19
+
+- Kamera HP memakai pengambilan foto native; desktop memakai foto resolusi penuh jika didukung.
+- Tambah editor potong/putar foto sebelum OCR, pembesaran teks kecil, pengurangan noise, kontras, dan beberapa percobaan pembacaan.
+- Susun kembali nama/kuantitas/harga berdasarkan posisi baris. Pilih hasil berdasarkan kejelasan dan kecocokan subtotal/total.
+- Hasil scan diperiksa sebelum mengganti tagihan. Hasil buruk tidak langsung diimpor; teks mentah disimpan dalam panel tertutup.
+- Kenali ringkasan ITEMS, pajak PB1/Pbl, pembayaran, dan pembulatan negatif. Pembulatan tersimpan dalam draft/riwayat dan ikut dihitung.
+- Tambah regresi struk restoran, proteksi OCR acak, dan uji pembacaan gambar nyata.
+
 # V6.0.0 — 2026-10-19
 
 - Added PATUNGAN / SPLIT BILL with real on-device receipt OCR and manual entry.

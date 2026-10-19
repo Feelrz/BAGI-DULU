@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import ts from 'typescript';
 const source = await readFile(new URL('../lib/splitbill.ts', import.meta.url), 'utf8');
 const compiled = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.ESNext } }).outputText;
-const { newBill, calculateBill, allocate, parseReceipt, parseReceiptMoney, normalizeBill } = await import('data:text/javascript;base64,' + Buffer.from(compiled).toString('base64'));
+const { newBill, calculateBill, allocate, parseReceipt, parseReceiptMoney, normalizeBill, assessReceipt } = await import('data:text/javascript;base64,' + Buffer.from(compiled).toString('base64'));
 let count = 0;
 function test(name, fn) { fn(); count++; console.log('PASS ' + name); }
 const a = { id: 'a', name: 'Ayu' }, b = { id: 'b', name: 'Bimo' }, c = { id: 'c', name: 'Caca' };
@@ -72,5 +72,27 @@ test('Corrupt imports cannot retain orphan or duplicate participant IDs', () => 
   const n=normalizeBill(bill({people:[a,a,b],items:[item('I',-2,['a','a','missing'])],payerId:'missing'}));
   assert.equal(n.people.length,2); assert.deepEqual(n.items[0].personIds,['a']); assert.equal(n.items[0].amount,0); assert.equal(n.payerId,'');
   assert.equal(normalizeBill(null),null); assert.equal(normalizeBill({}),null);
+});
+test('Restaurant receipt item count, PB1, tender and negative rounding', () => {
+  const p=parseReceipt('Receipt No.: TEST-001\nCashier: Demo\nNo Customer: 1\nSup Ayam 2 47,274\nNasi Putih 2 14,548\nEs Teh Manis 2 16,364\nITEMS: 6 78,186\nPb1 10% 7,819\nBefore Rounding 86,005\nRounding -5\nTotal 86,000\nOVO Cash 86,000');
+  assert.deepEqual(p.items.map(i=>[i.name,i.quantity,i.amount]),[['Sup Ayam',2,47274],['Nasi Putih',2,14548],['Es Teh Manis',2,16364]]);
+  assert.equal(p.subtotal,78186);assert.equal(p.tax,7819);assert.equal(p.rounding,-5);assert.equal(p.total,86000);
+  const r=calculateBill(bill({mode:'equal',people:[a,b],items:p.items,tax:{mode:'amount',value:p.tax},rounding:p.rounding,expectedTotal:p.total}));
+  assert.equal(r.total,86000);assert.equal(r.valid,true);assert.deepEqual(r.parts.map(x=>x.amount),[43000,43000]);
+  assert.equal(assessReceipt(p,91).issues.length,0);
+});
+test('OCR junk and incomplete or mismatched receipts cannot pass quietly', () => {
+  const junk=parseReceipt('EEE lh ER HEE EEE fifi 3\nle EEE EEE 3\nDate: 17 October 2021 11:36:04\nNo Customer: 1');
+  assert.equal(assessReceipt(junk,31).usable,false);
+  assert(assessReceipt(parseReceipt('Kopi 25,000\nTotal 50,000'),90).issues.includes('total'));
+  assert(assessReceipt(parseReceipt('Kopi 25,000'),95).issues.includes('noTotal'));
+  assert.equal(parseReceipt('ITEMS: 6\nOVO 86,000').items.length,0);
+  assert.equal(parseReceipt('Kopi 25,000\nPbl 10% 2,500\nTotal 27,500').tax,2500);
+});
+test('Signed rounding survives autosave normalization and old bills still work', () => {
+  const n=normalizeBill(bill({rounding:-5}));assert.equal(n.rounding,-5);
+  assert.equal(calculateBill(bill({rounding:undefined})).total,100000);
+  assert(calculateBill(bill({items:[item('Tiny',100,['a'])],rounding:-200})).issues.includes('rounding'));
+  assert.equal(parseReceipt('Sup Ayam | 2 47,274').items[0].name,'Sup Ayam');
 });
 console.log('\n' + count + ' test groups passed.');

@@ -1,3 +1,9 @@
+## Perbaikan scanner V6.0.1
+
+Di PATUNGAN, pilih **scan struk** atau **unggah foto**. Pada HP, scan membuka kamera bawaan. Geser sudut untuk menyisakan area struk, putar jika perlu, lalu pilih **BACA AREA INI**. Pastikan harga dan total tidak terpotong. Periksa tabel hasil dan pilih **MASUKKAN KE TAGIHAN**. Hasil yang kurang jelas memerlukan pemeriksaan; foto yang tidak terbaca tidak dapat diimpor. Koreksi form lalu konfirmasi pemeriksaan struk sebelum menyimpan/membagikan.
+
+OCR tetap berjalan di perangkat dan tidak memerlukan API key. Hasil bisa keliru pada foto buram, silau, miring, atau foto layar. Scanner mencoba beberapa versi gambar dan memeriksa subtotal/total, tetapi pengguna tetap perlu mencocokkan hasil dengan struk. Pembulatan seperti `-5` dapat diisi pada kolom pembulatan.
+
 # BAGI DULU — Money, Before It Disappears
 
 **BAGI DULU** is a bilingual, local-first personal finance OS with a little personality. It helps you split payday, set budgets, track money moves, build goals, manage recurring money, and see whether this month is still financially alive.

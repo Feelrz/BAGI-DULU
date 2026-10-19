@@ -1,7 +1,8 @@
 'use client';
 import { ChangeEvent, Dispatch, SetStateAction, useEffect, useMemo, useRef, useState } from 'react';
-import { BillItem, Charge, SplitBill, calculateBill, newBill, newId, parseReceipt, rupiah } from '../lib/splitbill';
-import { preparePhoto, readReceipt } from '../lib/receipt-ocr';
+import { BillItem, Charge, SplitBill, calculateBill, newBill, newId, rupiah, roundingAmount } from '../lib/splitbill';
+import { readReceipt } from '../lib/receipt-ocr';
+import ReceiptPhotoEditor from './ReceiptPhotoEditor';
 
 type Props = { language: 'id' | 'en'; draft: SplitBill; onDraft: Dispatch<SetStateAction<SplitBill>>; history: SplitBill[]; onHistory: Dispatch<SetStateAction<SplitBill[]>>; flash: (s: string) => void };
 export default function SplitBillPanel({ language, draft: b, onDraft, history, onHistory, flash }: Props) {
@@ -14,6 +15,11 @@ export default function SplitBillPanel({ language, draft: b, onDraft, history, o
   const [preview, setPreview] = useState('');
   const [rawText, setRawText] = useState('');
   const [scanNote, setScanNote] = useState('');
+  const [photoFile, setPhotoFile] = useState<Blob | null>(null);
+  const [pendingScan, setPendingScan] = useState<Awaited<ReturnType<typeof readReceipt>['promise']> | null>(null);
+  const [reviewScan, setReviewScan] = useState(false);
+  const [cameraStarting, setCameraStarting] = useState(false);
+  const [capturing, setCapturing] = useState(false);
   const [confidence, setConfidence] = useState<number | null>(null);
   const [shareText, setShareText] = useState('');
   const [cameraOpen, setCameraOpen] = useState(false);
@@ -56,58 +62,79 @@ export default function SplitBillPanel({ language, draft: b, onDraft, history, o
   }
   async function openCamera() {
     setError('');
+    if (/Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && /Macintosh/i.test(navigator.userAgent))) { captureRef.current?.click(); return; }
     if (!navigator.mediaDevices?.getUserMedia) { captureRef.current?.click(); return; }
+    if (cameraStarting) return;
+    setCameraStarting(true);
     const token = ++cameraToken.current;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 2560 } }, audio: false });
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 2560 }, height: { ideal: 1440 } }, audio: false });
       if (token !== cameraToken.current) { stream.getTracks().forEach(track => track.stop()); return; }
-      streamRef.current?.getTracks().forEach(track => track.stop()); streamRef.current = stream; setCameraOpen(true);
+      streamRef.current?.getTracks().forEach(track => track.stop()); streamRef.current = stream;
+      const track = stream.getVideoTracks()[0];
+      const capabilities = track.getCapabilities?.() as MediaTrackCapabilities & { focusMode?: string[] };
+      if (capabilities?.focusMode?.includes('continuous')) await track.applyConstraints({ advanced: [{ focusMode: 'continuous' } as MediaTrackConstraintSet] }).catch(() => undefined);
+      if (token !== cameraToken.current) { stream.getTracks().forEach(track => track.stop()); return; }
+      setCameraOpen(true);
     } catch {
       setError(t('Kamera tidak bisa dibuka. Izinkan kamera di browser, pakai Kamera HP, atau unggah foto struk.', 'Camera could not open. Allow camera access, use Phone camera, or upload a receipt.'));
-    }
+    } finally { setCameraStarting(false); }
   }
   async function takePhoto() {
     const video = videoRef.current;
-    if (!video?.videoWidth) return;
-    const canvas = document.createElement('canvas'); canvas.width = video.videoWidth; canvas.height = video.videoHeight;
-    canvas.getContext('2d')?.drawImage(video, 0, 0);
-    const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/jpeg', .95));
-    closeCamera();
-    if (blob) await scan(blob);
+    if (!video?.videoWidth || video.readyState < 2 || capturing) return;
+    const token = cameraToken.current;
+    setCapturing(true);
+    try {
+      let blob: Blob | null = null;
+      const captureClass = (window as unknown as { ImageCapture?: new (track: MediaStreamTrack) => { takePhoto: () => Promise<Blob> } }).ImageCapture;
+      const track = streamRef.current?.getVideoTracks()[0];
+      if (captureClass && track) blob = await new captureClass(track).takePhoto().catch(() => null);
+      if (!blob) {
+        const canvas = document.createElement('canvas'); canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+        canvas.getContext('2d')?.drawImage(video, 0, 0);
+        blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'));
+      }
+      if (token !== cameraToken.current) return;
+      closeCamera(); if (blob) setPhotoFile(blob);
+    } catch { setError(t('Foto gagal diambil. Coba Kamera HP atau unggah foto.', 'Could not capture the photo. Try Phone camera or upload.')); }
+    finally { setCapturing(false); }
   }
   async function pickFile(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]; event.target.value = '';
     if (!file) return;
     if (file.size > 20 * 1024 * 1024) { setError(t('Maksimal 20 MB. Pilih foto yang lebih kecil.', 'Maximum 20 MB. Choose a smaller image.')); return; }
     if (file.type && !file.type.startsWith('image/')) { setError(t('Pilih foto struk JPG, PNG, atau WebP.', 'Choose a JPG, PNG, or WebP receipt photo.')); return; }
-    await scan(file);
+    setError(''); setPhotoFile(file);
   }
-  async function scan(file: Blob) {
-    if (b.items.length && !window.confirm(t('Ganti daftar item dan biaya saat ini dengan hasil scan baru? Nama peserta tetap disimpan.', 'Replace the current items and charges with a new scan? Participants will be kept.'))) return;
+  async function scan(photo: Blob) {
     const token = ++scanToken.current;
-    setBusy(true); setProgress(0); setError(''); setScanNote(''); setConfidence(null); setRawText('');
+    setBusy(true); setProgress(0); setError(''); setScanNote(''); setConfidence(null); setRawText(''); setPendingScan(null); setReviewScan(false);
+    setPreview(URL.createObjectURL(photo));
     let timeout: ReturnType<typeof setTimeout> | undefined;
     try {
-      const photo = await preparePhoto(file);
-      if (token !== scanToken.current) return;
-      setPreview(URL.createObjectURL(photo));
-      const job = readReceipt(photo, p => { if (token === scanToken.current) setProgress(p.status === 'recognizing text' ? 20 + Math.round((p.progress || 0) * 80) : Math.round((p.progress || 0) * 18)); });
+      const job = readReceipt(photo, p => { if (token === scanToken.current) setProgress(Math.round(p.progress * 100)); });
       cancelRef.current = job.cancel;
-      timeout = setTimeout(() => { job.cancel(); if (token === scanToken.current) setError(t('Scan terlalu lama. Coba foto lebih kecil atau isi manual.', 'Scan timed out. Try a smaller photo or enter it manually.')); }, 120_000);
+      timeout = setTimeout(() => { job.cancel(); if (token === scanToken.current) setError(t('Scan terlalu lama. Coba potong area struk lebih rapat atau isi manual.', 'Scan timed out. Crop closer to the receipt or enter manually.')); }, 120_000);
       const scanned = await job.promise;
       if (token !== scanToken.current) return;
-      const parsed = parseReceipt(scanned.text);
-      setRawText(scanned.text); setConfidence(scanned.confidence);
-      if (!parsed.items.length) { setError(t('Item belum terbaca. Coba foto lebih dekat, lurus, dan terang, atau isi manual. Data sebelumnya tetap ada.', 'No items detected. Try a closer, straight, well-lit photo or enter manually. Your previous entries are intact.')); return; }
-      onDraft(current => ({ ...current, items: parsed.items, discount: { value: parsed.discount, mode: 'amount' }, service: { value: parsed.service, mode: 'amount' }, tax: { value: parsed.tax, mode: 'amount' }, extra: 0, taxOnService: false, expectedTotal: parsed.total, fromScan: true, reviewed: false }));
-      const sumsDiffer = parsed.subtotal !== null && parsed.items.reduce((s, i) => s + i.amount, 0) !== parsed.subtotal;
-      setScanNote(sumsDiffer ? t('Jumlah item berbeda dari subtotal struk. Periksa item yang terlewat atau terbaca ganda.', 'Item sum differs from receipt subtotal. Check missing or duplicate items.') : t('Hasil scan masuk ke form. Cocokkan nama, jumlah, harga, dan biaya dengan foto.', 'Scan added to the form. Check names, quantities, prices, and charges against the photo.'));
+      setRawText(scanned.text); setConfidence(scanned.confidence); setPendingScan(scanned);
+      setScanNote(scanned.assessment.usable ? t('Periksa hasil di bawah sebelum dimasukkan ke tagihan.', 'Check the results below before adding them to your bill.') : t('Foto belum terbaca dengan cukup baik. Ambil ulang atau isi manual. Tagihanmu belum diubah.', 'The photo is not clear enough. Retake or enter manually. Your bill has not changed.'));
     } catch (e) {
-      if (token === scanToken.current && (e as Error).message !== 'cancelled') setError(t('Scan gagal. Pastikan koneksi tersedia saat memuat pemindai. Untuk foto HEIC, coba JPG atau ambil foto baru. Input manual tetap bisa dipakai.', 'Scan failed. Make sure you are online while loading the scanner. For HEIC, try JPG or take a new photo. Manual entry is available.'));
+      if (token === scanToken.current && (e as Error).message !== 'cancelled') setError(t('Scan gagal. Cek koneksi untuk memuat pemindai, lalu coba lagi atau isi manual.', 'Scan failed. Check your connection to load the scanner, then retry or enter manually.'));
     } finally {
       if (timeout) clearTimeout(timeout);
       if (token === scanToken.current) { setBusy(false); cancelRef.current = null; }
     }
+  }
+  function useScan() {
+    if (!pendingScan?.assessment.usable || (pendingScan.assessment.issues.length > 0 && !reviewScan)) return;
+    if (b.items.length && !window.confirm(t('Ganti item dan biaya saat ini dengan hasil scan ini? Peserta tetap disimpan.', 'Replace the current items and charges with this scan? Participants will be kept.'))) return;
+    const parsed = pendingScan.receipt;
+    onDraft(current => ({ ...current, items: parsed.items, discount: { value: parsed.discount, mode: 'amount' }, service: { value: parsed.service, mode: 'amount' }, tax: { value: parsed.tax, mode: 'amount' }, extra: 0, rounding: parsed.rounding, taxOnService: false, expectedTotal: parsed.total, fromScan: true, reviewed: false }));
+    setPendingScan(null); setScanNote(t('Hasil dimasukkan. Koreksi nama, jumlah, dan nominal di form, lalu centang pemeriksaan struk.', 'Results added. Correct names, quantities and amounts in the form, then confirm your receipt review.'));
+    flash(t('Hasil scan masuk. Cek dan koreksi sebelum dibagi.', 'Scan added. Review and correct before splitting.'));
+    document.getElementById('sb-items')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
   function cancelScan() { scanToken.current++; cancelRef.current?.(); cancelRef.current = null; setBusy(false); setError(t('Scan dibatalkan. Data sebelumnya tetap ada.', 'Scan cancelled. Previous entries are intact.')); }
   function addPerson() {
@@ -124,7 +151,7 @@ export default function SplitBillPanel({ language, draft: b, onDraft, history, o
   }
   function resetDraft() {
     if (b.items.length && !window.confirm(t('Mulai tagihan baru? Simpan dulu jika draft ini masih diperlukan.', 'Start a new bill? Save first if you need this draft.'))) return;
-    onDraft(newBill()); setPreview(''); setRawText(''); setScanNote(''); setConfidence(null); setError('');
+    onDraft(newBill()); setPendingScan(null); setPreview(''); setRawText(''); setScanNote(''); setConfidence(null); setError('');
   }
   function save() {
     if (!result.valid) return;
@@ -139,7 +166,7 @@ export default function SplitBillPanel({ language, draft: b, onDraft, history, o
       const who = b.mode === 'equal' ? t('semua', 'everyone') : b.people.filter(p => item.personIds.includes(p.id)).map(p => p.name).join(', ');
       lines.push(item.quantity + ' × ' + item.name + ' — ' + money(item.amount) + ' (' + who + ')');
     }
-    lines.push('', 'Subtotal: ' + money(result.subtotal), t('Diskon: ', 'Discount: ') + money(result.discount), 'Service: ' + money(result.service), t('Pajak: ', 'Tax: ') + money(result.tax), t('Biaya lain: ', 'Other fees: ') + money(result.extra), 'TOTAL: ' + money(result.total), '', t('BAGIAN MASING-MASING', 'EACH PERSON'));
+    lines.push('', 'Subtotal: ' + money(result.subtotal), t('Diskon: ', 'Discount: ') + money(result.discount), 'Service: ' + money(result.service), t('Pajak: ', 'Tax: ') + money(result.tax), t('Biaya lain: ', 'Other fees: ') + money(result.extra), t('Pembulatan: ', 'Rounding: ') + money(result.rounding), 'TOTAL: ' + money(result.total), '', t('BAGIAN MASING-MASING', 'EACH PERSON'));
     result.parts.forEach(p => lines.push(p.name + ': ' + money(p.amount)));
     if (payer) {
       lines.push('', t('Ditalangi oleh ', 'Paid upfront by ') + payer.name);
@@ -155,20 +182,34 @@ export default function SplitBillPanel({ language, draft: b, onDraft, history, o
     catch { setShareText(text); }
   }
   const issueText: Record<string, string> = {
-    people: t('Tambahkan minimal 2 orang.', 'Add at least 2 people.'), names: t('Lengkapi semua nama.', 'Fill in every name.'), duplicateNames: t('Gunakan nama berbeda untuk tiap orang.', 'Use distinct names for each person.'), items: t('Tambahkan item atau total tagihan.', 'Add items or the bill total.'), itemDetails: t('Lengkapi nama dan harga setiap item.', 'Complete every item name and price.'), unassigned: t('Ada item yang belum dibagi ke siapa pun.', 'Some items have no participants.'), discount: t('Diskon tidak boleh melebihi subtotal.', 'Discount cannot exceed the subtotal.'), review: t('Periksa dan konfirmasi hasil scan.', 'Review and confirm the scanned receipt.'), mismatch: t('Cocokkan hitungan dengan total struk.', 'Reconcile the calculation with the receipt total.'), limit: t('Maksimal total Rp1 miliar per tagihan.', 'Maximum total is Rp1 billion per bill.'),
+    people: t('Tambahkan minimal 2 orang.', 'Add at least 2 people.'), names: t('Lengkapi semua nama.', 'Fill in every name.'), duplicateNames: t('Gunakan nama berbeda untuk tiap orang.', 'Use distinct names for each person.'), items: t('Tambahkan item atau total tagihan.', 'Add items or the bill total.'), itemDetails: t('Lengkapi nama dan harga setiap item.', 'Complete every item name and price.'), unassigned: t('Ada item yang belum dibagi ke siapa pun.', 'Some items have no participants.'), discount: t('Diskon tidak boleh melebihi subtotal.', 'Discount cannot exceed the subtotal.'), review: t('Periksa dan konfirmasi hasil scan.', 'Review and confirm the scanned receipt.'), mismatch: t('Cocokkan hitungan dengan total struk.', 'Reconcile the calculation with the receipt total.'), rounding: t('Pembulatan tidak boleh membuat total negatif.', 'Rounding cannot make the total negative.'), limit: t('Maksimal total Rp1 miliar per tagihan.', 'Maximum total is Rp1 billion per bill.'),
   };
   return <section className="page sb-page">
     <div className="sb-hero"><div><span className="eyebrow">BAGI DULU · SPLIT BILL</span><h1 className="page-title">{t('makan bareng.', 'eat together.')}<br/><em>{t('hitungnya beres.', 'split it right.')}</em></h1><p>{t('Foto struk atau ketik sendiri. Siapa pesan apa, siapa bayar berapa — kebaca semua.', 'Snap a receipt or type it in. Who ordered what, who owes how much — all sorted.')}</p></div><button type="button" className="ghost-btn" disabled={busy} onClick={resetDraft}>+ {t('TAGIHAN BARU', 'NEW BILL')}</button></div>
     <input hidden ref={uploadRef} type="file" accept="image/*" onChange={pickFile}/><input hidden ref={captureRef} type="file" accept="image/*" capture="environment" onChange={pickFile}/>
     <div className="sb-entry-grid">
-      <button className="sb-entry sb-entry-scan" type="button" disabled={busy} onClick={openCamera}><CameraIcon/><span><strong>{t('scan struk.', 'scan receipt.')}</strong><small>{t('Buka kamera, foto, otomatis terisi.', 'Open camera, snap, autofill.')}</small></span><b aria-hidden="true">↗</b></button>
+      <button className="sb-entry sb-entry-scan" type="button" disabled={busy || cameraStarting} onClick={openCamera}><CameraIcon/><span><strong>{t('scan struk.', 'scan receipt.')}</strong><small>{t('Foto, rapikan, periksa hasilnya.', 'Capture, frame, review the result.')}</small></span><b aria-hidden="true">↗</b></button>
       <button className="sb-entry" type="button" disabled={busy} onClick={() => uploadRef.current?.click()}><span className="sb-entry-icon" aria-hidden="true">↥</span><span><strong>{t('unggah foto.', 'upload photo.')}</strong><small>{t('Ambil struk dari galeri.', 'Pick a receipt from your gallery.')}</small></span><b aria-hidden="true">↗</b></button>
       <button className="sb-entry" type="button" disabled={busy} onClick={() => { if (!b.items.length) addItem(); document.getElementById('sb-items')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }}><span className="sb-entry-icon" aria-hidden="true">＋</span><span><strong>{t('isi manual.', 'type it in.')}</strong><small>{t('Tanpa struk? Tetap bisa patungan.', 'No receipt? Still split the bill.')}</small></span><b aria-hidden="true">↗</b></button>
     </div>
     <p className="sb-privacy">{t('Foto diproses di perangkat ini. Tidak diunggah. Pemindai perlu koneksi saat pertama dimuat.', 'Photos are processed on this device, never uploaded. The scanner needs a connection on first load.')} <button className="text-btn" type="button" disabled={busy} onClick={() => captureRef.current?.click()}>{t('Kamera HP ↗', 'Phone camera ↗')}</button></p>
-    {busy && <div className="sb-progress" role="status"><span>{t('Lagi baca struk…', 'Reading your receipt…')} {progress}%</span><progress max="100" value={progress}/><button className="ghost-btn" type="button" onClick={cancelScan}>{t('Batalkan', 'Cancel')}</button></div>}
+    {busy && <div className="sb-progress" role="status"><span>{progress > 45 ? t('Memeriksa ulang tulisan & angka…', 'Checking text and amounts…') : t('Lagi baca struk…', 'Reading your receipt…')} {progress}%</span><progress max="100" value={progress}/><button className="ghost-btn" type="button" onClick={cancelScan}>{t('Batalkan', 'Cancel')}</button></div>}
     {error && <p className="sb-alert" role="alert">{error}</p>}
-    {preview && <details className="sb-scan-preview" open={b.fromScan && !b.reviewed}><summary>{t('Lihat foto & hasil pembacaan', 'View photo & recognized text')}{confidence !== null && confidence < 75 ? t(' · hasil kurang jelas', ' · low clarity') : ''}</summary><div><img src={preview} alt={t('Foto struk yang dipilih', 'Selected receipt photo')}/><section><p>{scanNote}</p>{confidence !== null && confidence < 75 && <p className="sb-alert">{t('Sebagian tulisan kurang jelas. Cek setiap nominal dengan teliti.', 'Some text is unclear. Check every amount carefully.')}</p>}<pre>{rawText || t('Belum ada teks terbaca.', 'No text recognized yet.')}</pre></section></div></details>}
+    {preview && <section className="sb-scan-review" aria-label={t('Pemeriksaan hasil scan', 'Scan result review')}>
+      <div className="sb-card-head"><div><span className="eyebrow">{t('HASIL PEMBACAAN', 'SCAN RESULTS')}</span><h2>{pendingScan ? t('cek dulu, baru masuk.', 'review before adding.') : t('foto strukmu.', 'your receipt.')}</h2></div></div>
+      <p>{scanNote || t('Foto sedang dibaca. Input sebelumnya tetap aman.', 'Reading the photo. Your existing entries are safe.')}</p>
+      {pendingScan && <>
+        {pendingScan.assessment.issues.length > 0 && <div className="sb-alert" role="status"><strong>{t('Hasil masih perlu diperiksa.', 'These results need checking.')}</strong> {t('Jangan gunakan nominal yang tidak cocok dengan foto.', 'Do not use amounts that do not match the photo.')}
+          {(pendingScan.assessment.issues.includes('total') || pendingScan.assessment.issues.includes('subtotal')) && <p>{t('Jumlah item dan biaya belum cocok dengan total struk.', 'Items and charges do not match the receipt total.')}</p>}
+          {pendingScan.assessment.issues.includes('noTotal') && <p>{t('Total struk belum ditemukan. Pastikan bagian bawah struk masuk foto.', 'Receipt total not found. Include the bottom of the receipt.')}</p>}
+        </div>}
+        {pendingScan.assessment.usable && pendingScan.receipt.items.length > 0 && <div className="sb-scan-table-wrap"><table className="sb-scan-table"><thead><tr><th>{t('Item terbaca', 'Detected item')}</th><th>{t('Jml', 'Qty')}</th><th>{t('Total baris', 'Line total')}</th></tr></thead><tbody>{pendingScan.receipt.items.map(item => <tr key={item.id}><td>{item.name}</td><td>{item.quantity}</td><td>{money(item.amount)}</td></tr>)}</tbody></table></div>}
+        <div className="sb-scan-amounts"><span>{t('Pajak', 'Tax')} <b>{money(pendingScan.receipt.tax)}</b></span><span>{t('Pembulatan', 'Rounding')} <b>{money(pendingScan.receipt.rounding)}</b></span><span>{t('Total struk', 'Receipt total')} <b>{pendingScan.receipt.total === null ? '—' : money(pendingScan.receipt.total)}</b></span></div>
+        {pendingScan.assessment.usable && pendingScan.assessment.issues.length > 0 && <label className="sb-check"><input type="checkbox" checked={reviewScan} onChange={e => setReviewScan(e.target.checked)}/><span>{t('Saya akan mengoreksi hasil yang belum cocok di form.', 'I will correct the uncertain results in the form.')}</span></label>}
+        <div className="sb-photo-tools"><button className="primary-btn" type="button" disabled={!pendingScan.assessment.usable || (pendingScan.assessment.issues.length > 0 && !reviewScan)} onClick={useScan}>{t('MASUKKAN KE TAGIHAN', 'ADD TO BILL')}</button><button className="ghost-btn" type="button" onClick={openCamera}>{t('Foto ulang', 'Retake photo')}</button></div>
+      </>}
+      <details className="sb-scan-preview"><summary>{t('Lihat foto & teks mentah', 'View photo & raw text')}{confidence !== null && confidence < 70 ? t(' · kurang jelas', ' · low clarity') : ''}</summary><div><img src={preview} alt={t('Foto struk yang dipilih', 'Selected receipt photo')}/><section><pre>{rawText || t('Belum ada teks terbaca.', 'No text recognized yet.')}</pre></section></div></details>
+    </section>}
     <fieldset className="sb-workspace" disabled={busy}><legend className="sb-sr-only">{t('Editor patungan', 'Split bill editor')}</legend><div className="sb-editor">
       <div className="sb-card"><div className="sb-card-head"><span className="sb-step">01</span><div><span className="eyebrow">{t('SIAPA AJA?', 'WHO IS IN?')}</span><h2>{t('mejanya rame berapa?', 'who is at the table?')}</h2></div></div>
         <div className="sb-metadata"><label className="sb-field"><span>{t('Nama tagihan', 'Bill name')}</span><input value={b.title} maxLength={80} placeholder={t('Mis. Makan malam bareng', 'e.g. Dinner with friends')} onChange={e => patch({ title: e.target.value })}/></label><label className="sb-field"><span>{t('Tanggal', 'Date')}</span><input type="date" value={b.date} onChange={e => patch({ date: e.target.value })}/></label></div>
@@ -187,13 +228,14 @@ export default function SplitBillPanel({ language, draft: b, onDraft, history, o
       </div>
       <div className="sb-card"><div className="sb-card-head"><span className="sb-step">03</span><div><span className="eyebrow">{t('BIAR PAS', 'THE FINAL DETAILS')}</span><h2>{t('pajak & teman-temannya.', 'the little extras.')}</h2></div></div>
         <div className="sb-charges"><ChargeField label={t('Diskon', 'Discount')} value={b.discount} onChange={discount => patch({ discount })} language={language}/><ChargeField label="Service" value={b.service} onChange={service => patch({ service })} language={language}/><ChargeField label={t('Pajak', 'Tax')} value={b.tax} onChange={tax => patch({ tax })} language={language}/><label className="sb-field"><span>{t('Biaya lain · Rp', 'Other fees · Rp')}</span><input type="number" inputMode="numeric" min="0" max="1000000000" value={b.extra || ''} placeholder="0" onChange={e => patch({ extra: rupiah(e.target.value) })}/></label></div>
+        <RoundingField value={b.rounding || 0} onChange={rounding => patch({ rounding })} label={t('Pembulatan struk · Rp (boleh minus)', 'Receipt rounding · Rp (can be negative)')}/>
         <label className="sb-check"><input type="checkbox" checked={b.taxOnService} onChange={e => patch({ taxOnService: e.target.checked })}/><span>{t('Pajak persentase juga dihitung dari service.', 'Percentage tax also applies to the service charge.')}</span></label>
         <p className="sb-hint">{t('Diskon mengurangi subtotal. Service % dihitung sesudah diskon. Biaya dibagi mengikuti porsi pesanan; mode bagi rata membagi semuanya sama rata. Isi nominal final jika struk memakai dasar hitung lain.', 'Discount reduces the subtotal. Service % uses the discounted subtotal. Fees follow each order share; equal mode splits everything equally. Use final amounts if your receipt uses another basis.')}</p>
         <div className="sb-metadata"><label className="sb-field"><span>{t('Total di struk · Rp (opsional)', 'Receipt total · Rp (optional)')}</span><input type="number" inputMode="numeric" min="0" max="1000000000" placeholder={t('Untuk cek selisih', 'For reconciliation')} value={b.expectedTotal ?? ''} onChange={e => patch({ expectedTotal: e.target.value === '' ? null : rupiah(e.target.value) })}/></label><label className="sb-field"><span>{t('Siapa yang nalangin?', 'Who paid upfront?')}</span><select value={b.payerId} onChange={e => patch({ payerId: e.target.value })}><option value="">{t('Belum ditentukan', 'Not selected')}</option>{b.people.map(p => <option value={p.id} key={p.id}>{p.name}</option>)}</select></label></div>
         {b.fromScan && <label className="sb-check sb-review"><input type="checkbox" checked={b.reviewed} onChange={e => patch({ reviewed: e.target.checked })}/><span>{t('Nama, jumlah, harga, pajak, service, dan diskon sudah dicocokkan dengan struk.', 'I checked names, quantities, prices, tax, service, and discount against the receipt.')}</span></label>}
       </div>
     </div><aside className="sb-summary" aria-label={t('Hasil pembagian', 'Split result')}><div className="sb-summary-head"><span className="eyebrow">{t('TAGIHAN SATU MEJA', 'ONE TABLE, ONE BILL')}</span><span className="sb-ticket-mark" aria-hidden="true">B</span></div><div className="sb-grand"><span>{t('TOTAL DIBAGI', 'TOTAL TO SPLIT')}</span><strong>{money(result.total)}</strong><small>{b.people.length} {t('orang', 'people')} · {b.items.length} {t('item', 'items')}</small></div>
-      <dl className="sb-totals"><div><dt>Subtotal</dt><dd>{money(result.subtotal)}</dd></div><div><dt>{t('Diskon', 'Discount')}</dt><dd>−{money(result.discount)}</dd></div><div><dt>Service</dt><dd>{money(result.service)}</dd></div><div><dt>{t('Pajak', 'Tax')}</dt><dd>{money(result.tax)}</dd></div><div><dt>{t('Biaya lain', 'Other fees')}</dt><dd>{money(result.extra)}</dd></div></dl>
+      <dl className="sb-totals"><div><dt>Subtotal</dt><dd>{money(result.subtotal)}</dd></div><div><dt>{t('Diskon', 'Discount')}</dt><dd>−{money(result.discount)}</dd></div><div><dt>Service</dt><dd>{money(result.service)}</dd></div><div><dt>{t('Pajak', 'Tax')}</dt><dd>{money(result.tax)}</dd></div><div><dt>{t('Biaya lain', 'Other fees')}</dt><dd>{money(result.extra)}</dd></div>{result.rounding !== 0 && <div><dt>{t('Pembulatan', 'Rounding')}</dt><dd>{money(result.rounding)}</dd></div>}</dl>
       {result.mismatch !== null && <div className={result.mismatch === 0 ? 'sb-match' : 'sb-alert'}>{result.mismatch === 0 ? t('✓ Total cocok dengan struk', '✓ Total matches the receipt') : t('Selisih dari struk: ', 'Difference from receipt: ') + (result.mismatch > 0 ? '+' : '') + money(result.mismatch)}</div>}
       <div className="sb-person-totals"><span className="eyebrow">{t('BAGIAN MASING-MASING', 'EACH PERSON')}</span>{b.people.length === 0 ? <p className="sb-hint">{t('Nama dan nominal akan muncul di sini.', 'Names and amounts will appear here.')}</p> : result.parts.map((p, i) => <div key={p.id}><span className="sb-avatar">{String(i + 1).padStart(2, '0')}</span><span>{p.name || '…'}{p.id === b.payerId && <small>{t('yang nalangin', 'paid upfront')}</small>}</span><strong>{result.unassigned ? '—' : money(p.amount)}</strong></div>)}</div>
       {b.payerId && result.valid && <div className="sb-settlement"><span className="eyebrow">{t('TINGGAL BALIKIN KE', 'REPAY')}</span><h3>{b.people.find(p => p.id === b.payerId)?.name}</h3>{result.parts.filter(p => p.id !== b.payerId && p.amount > 0).map(p => <div key={p.id}><span>{p.name} →</span><b>{money(p.amount)}</b></div>)}</div>}
@@ -202,9 +244,15 @@ export default function SplitBillPanel({ language, draft: b, onDraft, history, o
       <p className="sb-hint">{t('Draft otomatis tersimpan. Tidak mencatat pengeluaran atau mentransfer uang. Selisih Rp1 dari pembulatan dialokasikan agar total pas.', 'Draft autosaves. This does not record expenses or transfer money. Rp1 rounding differences are allocated so the total matches.')}</p>
       {shareText && <label className="sb-field"><span>{t('Salin teks ini', 'Copy this text')}</span><textarea readOnly value={shareText} onFocus={e => e.target.select()} rows={10}/></label>}
     </aside></fieldset>
-    {history.length > 0 && <section className="sb-history"><div className="sb-card-head"><div><span className="eyebrow">{t('RIWAYAT PATUNGAN', 'SAVED BILLS')}</span><h2>{t('yang pernah satu meja.', 'previously at the table.')}</h2></div><small>{t('40 tagihan terakhir', 'Last 40 bills')}</small></div>{history.map(bill => <article key={bill.id}><div><span>{bill.date} · {bill.people.length} {t('orang', 'people')}</span><strong>{bill.title || t('Patungan', 'Split bill')}</strong></div><b>{money(calculateBill(bill).total)}</b><button className="ghost-btn" type="button" disabled={busy} onClick={() => { if (b.items.length && b.id !== bill.id && !window.confirm(t('Buka tagihan ini? Perubahan draft yang belum disimpan akan terganti.', 'Open this bill? Unsaved draft changes will be replaced.'))) return; onDraft(bill); setPreview(''); setRawText(''); setError(''); document.getElementById('top')?.scrollIntoView({ behavior: 'smooth' }); }}>{t('Buka', 'Open')}</button><button className="text-btn" type="button" disabled={busy} onClick={() => { if (window.confirm(t('Hapus tagihan tersimpan ini?', 'Delete this saved bill?'))) onHistory(current => current.filter(x => x.id !== bill.id)); }}>{t('Hapus', 'Delete')}</button></article>)}</section>}
-    {cameraOpen && <dialog ref={dialogRef} className="sb-camera" onCancel={e => { e.preventDefault(); closeCamera(); }}><div className="sb-camera-head"><h2>{t('Foto struk', 'Capture receipt')}</h2><button type="button" className="icon-btn" onClick={closeCamera} aria-label={t('Tutup kamera', 'Close camera')}>×</button></div><p>{t('Pastikan seluruh struk masuk, tulisan tajam, dan cahaya cukup.', 'Fit the whole receipt, keep text sharp, and use good lighting.')}</p><video ref={videoRef} autoPlay muted playsInline/><div className="sb-camera-actions"><button type="button" className="primary-btn" disabled={!cameraReady} onClick={takePhoto}>{t('FOTO & BACA STRUK', 'CAPTURE & READ')}</button><button type="button" className="ghost-btn" onClick={closeCamera}>{t('Batal', 'Cancel')}</button></div></dialog>}
+    {history.length > 0 && <section className="sb-history"><div className="sb-card-head"><div><span className="eyebrow">{t('RIWAYAT PATUNGAN', 'SAVED BILLS')}</span><h2>{t('yang pernah satu meja.', 'previously at the table.')}</h2></div><small>{t('40 tagihan terakhir', 'Last 40 bills')}</small></div>{history.map(bill => <article key={bill.id}><div><span>{bill.date} · {bill.people.length} {t('orang', 'people')}</span><strong>{bill.title || t('Patungan', 'Split bill')}</strong></div><b>{money(calculateBill(bill).total)}</b><button className="ghost-btn" type="button" disabled={busy} onClick={() => { if (b.items.length && b.id !== bill.id && !window.confirm(t('Buka tagihan ini? Perubahan draft yang belum disimpan akan terganti.', 'Open this bill? Unsaved draft changes will be replaced.'))) return; onDraft(bill); setPendingScan(null); setPreview(''); setRawText(''); setError(''); document.getElementById('top')?.scrollIntoView({ behavior: 'smooth' }); }}>{t('Buka', 'Open')}</button><button className="text-btn" type="button" disabled={busy} onClick={() => { if (window.confirm(t('Hapus tagihan tersimpan ini?', 'Delete this saved bill?'))) onHistory(current => current.filter(x => x.id !== bill.id)); }}>{t('Hapus', 'Delete')}</button></article>)}</section>}
+    {photoFile && <ReceiptPhotoEditor file={photoFile} language={language} onCancel={() => setPhotoFile(null)} onConfirm={photo => { setPhotoFile(null); void scan(photo); }}/>}
+    {cameraOpen && <dialog ref={dialogRef} className="sb-camera" onCancel={e => { e.preventDefault(); closeCamera(); }}><div className="sb-camera-head"><h2>{t('Foto struk', 'Capture receipt')}</h2><button type="button" className="icon-btn" onClick={closeCamera} aria-label={t('Tutup kamera', 'Close camera')}>×</button></div><p>{t('Pastikan seluruh struk masuk, tulisan tajam, dan cahaya cukup.', 'Fit the whole receipt, keep text sharp, and use good lighting.')}</p><video ref={videoRef} autoPlay muted playsInline onLoadedData={() => setCameraReady(true)}/><div className="sb-camera-actions"><button type="button" className="primary-btn" disabled={!cameraReady || capturing} onClick={takePhoto}>{capturing ? t('MENGAMBIL FOTO…', 'CAPTURING…') : t('AMBIL FOTO', 'CAPTURE PHOTO')}</button><button type="button" className="ghost-btn" onClick={closeCamera}>{t('Batal', 'Cancel')}</button></div></dialog>}
   </section>;
+}
+function RoundingField({ value, onChange, label }: { value: number; onChange: (value: number) => void; label: string }) {
+  const [text, setText] = useState(value ? String(value) : '');
+  useEffect(() => { setText(value ? String(value) : ''); }, [value]);
+  return <label className="sb-field sb-rounding"><span>{label}</span><input type="text" inputMode="text" value={text} placeholder="0" maxLength={6} onChange={e => { const raw = e.target.value; if (!/^-?\d*$/.test(raw)) return; setText(raw); if (raw !== '-') onChange(roundingAmount(raw)); }} onBlur={() => { const amount = roundingAmount(text); setText(amount ? String(amount) : ''); onChange(amount); }}/></label>;
 }
 function ChargeField({ label, value, onChange, language }: { label: string; value: Charge; onChange: (v: Charge) => void; language: 'id' | 'en' }) {
   return <div className="sb-field"><label><span>{label}</span><input type="number" inputMode="decimal" min="0" step={value.mode === 'percent' ? '.01' : '1'} max={value.mode === 'percent' ? '100' : '1000000000'} value={value.value || ''} placeholder="0" onChange={e => onChange({ ...value, value: value.mode === 'percent' ? Math.min(100, Math.max(0, Number(e.target.value) || 0)) : rupiah(e.target.value) })}/></label><select aria-label={(language === 'id' ? 'Satuan ' : 'Unit for ') + label} value={value.mode} onChange={e => onChange({ mode: e.target.value as Charge['mode'], value: 0 })}><option value="amount">Rp</option><option value="percent">%</option></select></div>;

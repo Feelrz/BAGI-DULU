@@ -639,3 +639,34 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
   .sb-history .sb-card-head small { display: none; }
 }
 @media (prefers-reduced-motion: reduce) { .sb-page *, .sb-page *::before { scroll-behavior: auto !important; transition: none !important; } }
+
+/* Receipt scan review and touch-friendly crop editor. */
+.sb-scan-review { border: 1px solid var(--line); border-radius: 16px; padding: 22px; margin: 20px 0; background: var(--surface); }
+.sb-scan-review > p { color: var(--muted); font-size: 13px; line-height: 1.6; }
+.sb-scan-table-wrap { overflow-x: auto; margin: 14px 0; }
+.sb-scan-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.sb-scan-table th, .sb-scan-table td { text-align: left; padding: 11px 8px; border-bottom: 1px solid var(--line); }
+.sb-scan-table th { font-size: 10px; color: var(--muted); text-transform: uppercase; }
+.sb-scan-table td:first-child { overflow-wrap: anywhere; }
+.sb-scan-table th:last-child, .sb-scan-table td:last-child { text-align: right; white-space: nowrap; }
+.sb-scan-amounts { display: flex; flex-wrap: wrap; gap: 12px 24px; font-size: 11px; color: var(--muted); }
+.sb-scan-amounts b { color: var(--text); margin-left: 5px; }
+.sb-photo-tools { display: flex; flex-wrap: wrap; gap: 9px; align-items: center; margin: 16px 0; }
+.sb-rounding { max-width: 340px; margin: 16px 0; }
+.sb-photo-editor { max-height: calc(100dvh - 24px); overscroll-behavior: contain; }
+.sb-crop-stage { position: relative; width: fit-content; max-width: calc(100% - 28px); margin: 20px auto; overflow: hidden; touch-action: none; user-select: none; background: #111; }
+.sb-crop-stage > img { display: block; width: auto; height: auto; max-width: 100%; max-height: 48dvh; pointer-events: none; }
+.sb-crop-box { position: absolute; border: 2px solid #f0df52; box-shadow: 0 0 0 2000px rgba(0,0,0,.55); pointer-events: none; }
+.sb-crop-handle { position: absolute; width: 44px; height: 44px; padding: 0; border: 0; background: transparent; pointer-events: auto; touch-action: none; cursor: crosshair; }
+.sb-crop-handle::after { content: ''; display: block; position: absolute; width: 17px; height: 17px; background: #f0df52; border: 2px solid #111; border-radius: 50%; inset: 12px; }
+.sb-crop-nw { left: -22px; top: -22px; }.sb-crop-ne { right: -22px; top: -22px; }.sb-crop-sw { left: -22px; bottom: -22px; }.sb-crop-se { right: -22px; bottom: -22px; }
+#sb-items { scroll-margin-top: 180px; }
+@media (max-width: 600px) {
+  .sb-scan-review { padding: 16px; }
+  .sb-scan-review .sb-card-head h2 { font-size: 24px; }
+  .sb-photo-editor { padding: 16px; }
+  .sb-photo-editor .sb-camera-actions { position: sticky; bottom: -16px; padding: 12px 0; margin: 0; background: var(--surface); }
+  .sb-photo-editor .sb-camera-actions button { min-height: 46px; }
+  .sb-photo-tools > .primary-btn { width: 100%; min-height: 46px; }
+  .sb-photo-tools .ghost-btn { min-height: 44px; }
+}

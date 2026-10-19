@@ -4,13 +4,14 @@ export type Charge = { value: number; mode: 'amount' | 'percent' };
 export type SplitBill = {
   id: string; title: string; date: string; people: Person[]; items: BillItem[];
   mode: 'items' | 'equal'; discount: Charge; service: Charge; tax: Charge;
-  taxOnService: boolean; extra: number; payerId: string; expectedTotal: number | null;
+  taxOnService: boolean; extra: number; rounding?: number; payerId: string; expectedTotal: number | null;
   fromScan: boolean; reviewed: boolean; savedAt?: string;
 };
 export const MAX_MONEY = 1_000_000_000;
 export const newId = () => globalThis.crypto?.randomUUID?.() || 'b-' + Date.now().toString(36) + Math.random().toString(36).slice(2);
 const nonnegative = (v: unknown, max = MAX_MONEY) => Math.min(max, Math.max(0, Number(v) || 0));
 export const rupiah = (v: unknown) => Math.round(nonnegative(v));
+export const roundingAmount = (v: unknown) => Math.round(Math.min(10000, Math.max(-10000, Number(v) || 0)));
 const blankCharge = (): Charge => ({ value: 0, mode: 'amount' });
 export function newBill(): SplitBill {
   const d = new Date();
@@ -37,7 +38,7 @@ export function normalizeBill(value: unknown): SplitBill | null {
     return { id, name: String(i.name || '').slice(0, 80), quantity: Math.max(1, Math.round(nonnegative(i.quantity, 999))), amount: rupiah(i.amount), personIds: Array.from(new Set(Array.isArray(i.personIds) ? i.personIds.filter(id => ids.has(id)) : [])) };
   });
   const charge = (v: Charge | undefined): Charge => ({ value: nonnegative(v?.value, v?.mode === 'percent' ? 100 : MAX_MONEY), mode: v?.mode === 'percent' ? 'percent' : 'amount' });
-  return { ...newBill(), id: String(b.id || newId()).slice(0, 80), title: String(b.title || '').slice(0, 80), date: /^\d{4}-\d{2}-\d{2}$/.test(String(b.date)) ? b.date! : newBill().date, people, items, mode: b.mode === 'equal' ? 'equal' : 'items', discount: charge(b.discount), service: charge(b.service), tax: charge(b.tax), taxOnService: b.taxOnService === true, extra: rupiah(b.extra), payerId: ids.has(b.payerId || '') ? b.payerId! : '', expectedTotal: b.expectedTotal == null ? null : rupiah(b.expectedTotal), fromScan: b.fromScan === true, reviewed: b.reviewed !== false, savedAt: typeof b.savedAt === 'string' ? b.savedAt : undefined };
+  return { ...newBill(), id: String(b.id || newId()).slice(0, 80), title: String(b.title || '').slice(0, 80), date: /^\d{4}-\d{2}-\d{2}$/.test(String(b.date)) ? b.date! : newBill().date, people, items, mode: b.mode === 'equal' ? 'equal' : 'items', discount: charge(b.discount), service: charge(b.service), tax: charge(b.tax), taxOnService: b.taxOnService === true, extra: rupiah(b.extra), rounding: roundingAmount(b.rounding), payerId: ids.has(b.payerId || '') ? b.payerId! : '', expectedTotal: b.expectedTotal == null ? null : rupiah(b.expectedTotal), fromScan: b.fromScan === true, reviewed: b.reviewed !== false, savedAt: typeof b.savedAt === 'string' ? b.savedAt : undefined };
 }
 // Largest remainder allocation. Ties follow participant order; totals stay exact in whole rupiah.
 export function allocate(total: number, weights: number[]): number[] {
@@ -60,7 +61,8 @@ export function calculateBill(b: SplitBill) {
   const service = charge(b.service, net);
   const tax = charge(b.tax, net + (b.taxOnService ? service : 0));
   const extra = rupiah(b.extra);
-  const total = net + service + tax + extra;
+  const rounding = roundingAmount(b.rounding);
+  const total = Math.max(0, net + service + tax + extra + rounding);
   const weights = b.people.map(() => 0);
   let unassigned = 0;
   if (b.mode === 'equal') weights.fill(1);
@@ -83,8 +85,9 @@ export function calculateBill(b: SplitBill) {
   if (requestedDiscount > subtotal) issues.push('discount');
   if (b.fromScan && !b.reviewed) issues.push('review');
   if (mismatch !== null && mismatch !== 0) issues.push('mismatch');
+  if (net + service + tax + extra + rounding < 0) issues.push('rounding');
   if (total > MAX_MONEY) issues.push('limit');
-  return { subtotal, discount, service, tax, extra, total, parts, unassigned, mismatch, issues, valid: issues.length === 0 };
+  return { subtotal, discount, service, tax, extra, rounding, total, parts, unassigned, mismatch, issues, valid: issues.length === 0 };
 }
 // Accept Indonesian and English receipt separators; round sub-rupiah fractions once.
 export function parseReceiptMoney(input: string): number | null {
@@ -97,14 +100,14 @@ export function parseReceiptMoney(input: string): number | null {
   const n = Number(s);
   return Number.isFinite(n) && n <= MAX_MONEY ? Math.round(n) * (negative ? -1 : 1) : null;
 }
-export type ParsedReceipt = { items: BillItem[]; tax: number; service: number; discount: number; total: number | null; subtotal: number | null; skipped: string[] };
+export type ParsedReceipt = { items: BillItem[]; tax: number; service: number; discount: number; rounding: number; total: number | null; subtotal: number | null; skipped: string[] };
 export function parseReceipt(text: string): ParsedReceipt {
-  const out: ParsedReceipt = { items: [], tax: 0, service: 0, discount: 0, total: null, subtotal: null, skipped: [] };
+  const out: ParsedReceipt = { items: [], tax: 0, service: 0, discount: 0, rounding: 0, total: null, subtotal: null, skipped: [] };
   const lines = text.replace(/\r/g, '').split('\n').map(l => l.trim()).filter(Boolean);
   let pendingName = '';
   let footer = false;
   for (const line of lines) {
-    const match = line.match(/(-?(?:Rp\.?\s*)?\d[\d.,]*)\s*(?:[A-Z*])?\s*$/i);
+    const match = line.match(/(-?\s*(?:Rp\.?\s*)?\d[\d.,]*)\s*(?:[A-Z*])?\s*$/i);
     if (!match) {
       if (!footer && /^[A-Za-z][A-Za-z\s&()/'-]{2,70}$/.test(line) && !/kasir|cashier|alamat|address|terima kasih|thank|receipt|invoice|table|meja/i.test(line)) pendingName = line;
       else pendingName = '';
@@ -114,12 +117,23 @@ export function parseReceipt(text: string): ParsedReceipt {
     if (amount === null) { out.skipped.push(line); pendingName = ''; continue; }
     const lead = line.slice(0, match.index).trim();
     const lower = lead.toLowerCase();
+    if (/^(items?|total\s*items?|jumlah\s*(item|barang))\b/.test(lower)) {
+      // ITEMS: 6 78,186 contains a count and a subtotal, never a menu item.
+      if (/\d/.test(lead) && amount >= 100) out.subtotal = Math.abs(amount);
+      footer = true; pendingName = ''; continue;
+    }
+    if (/^(before\s*rounding|sebelum\s*pembulatan)\b/.test(lower)) { footer = true; pendingName = ''; continue; }
+    if (/^(rounding|round\s*off|pembulatan)\b/.test(lower)) {
+      if (Math.abs(amount) <= 10000) out.rounding = amount;
+      else out.skipped.push(line);
+      footer = true; pendingName = ''; continue;
+    }
     if (/^(sub\s*total|subtotal)\b/.test(lower)) { out.subtotal = Math.abs(amount); footer = true; pendingName = ''; continue; }
     if (/^(grand\s*total|total\s*(bayar|payment|tagihan|due)?|amount\s*due|jumlah\s*(bayar|tagihan))\s*[:=]?\s*$/.test(lower)) { out.total = Math.abs(amount); footer = true; pendingName = ''; continue; }
-    if (/^(pajak|tax|ppn|pb1|pbjt|vat)\b/.test(lower)) { out.tax += Math.abs(amount); footer = true; pendingName = ''; continue; }
+    if (/^(pajak|tax|ppn|pb[1il]|pbjt|vat)\b/.test(lower)) { out.tax += Math.abs(amount); footer = true; pendingName = ''; continue; }
     if (/^(service|servis|svc|layanan)\b/.test(lower)) { out.service += Math.abs(amount); footer = true; pendingName = ''; continue; }
     if (/^(discount|diskon|disc|potongan)\b/.test(lower)) { out.discount += Math.abs(amount); pendingName = ''; continue; }
-    if (/\b(cash|tunai|change|kembali|kembalian|debit|credit|kredit|qris|visa|mastercard|payment|bayar|tender|telp|phone|npwp|kasir|cashier|meja|table|receipt|invoice|order|ref)\b/i.test(lead) || /\d[:/]\d/.test(line) || /^\s*(no\.?|nomor|jl\.?|jalan)\b/i.test(lead)) { pendingName = ''; continue; }
+    if (/\b(cash|tunai|change|kembali|kembalian|debit|credit|kredit|qris|visa|mastercard|payment|bayar|tender|telp|phone|npwp|kasir|cashier|meja|table|receipt|invoice|order|ref|customer|date|tanggal|ovo|gopay|shopeepay|dana)\b/i.test(lead) || /\d[:/]\d/.test(line) || /^\s*(no\.?|nomor|jl\.?|jalan)\b/i.test(lead)) { pendingName = ''; continue; }
     if (footer) { out.skipped.push(line); pendingName = ''; continue; }
     let name = lead;
     let quantity = 1;
@@ -132,10 +146,29 @@ export function parseReceipt(text: string): ParsedReceipt {
     if (trailingQuantity) { quantity = Math.max(1, Number(trailingQuantity[1])); name = name.slice(0, trailingQuantity.index).trim(); }
     // 2 x 25000 [50000] under a standalone item name.
     if ((!name || /^[\d\s.,xX×@]+$/.test(name)) && pendingName) { name = pendingName; const q = lead.match(/^(\d{1,3})\s*[xX×@]/); if (q) quantity = Number(q[1]); }
-    name = name.replace(/\s+@?\s*(?:Rp\.?\s*)?\d[\d.,]*\s*$/i, '').replace(/[:=]+$/, '').trim();
-    if (amount > 0 && /[A-Za-z]/.test(name) && name.length >= 2) out.items.push({ id: newId(), name: name.slice(0, 80), quantity, amount, personIds: [] });
+    name = name.replace(/\s+@?\s*(?:Rp\.?\s*)?\d[\d.,]*\s*$/i, '').replace(/[|¦:=]+$/, '').replace(/\s+/g, ' ').trim();
+    if (amount > 0 && /[A-Za-z]/.test(name) && name.length >= 2 && !/[=|_~]{2,}/.test(name)) out.items.push({ id: newId(), name: name.slice(0, 80), quantity, amount, personIds: [] });
     else out.skipped.push(line);
     pendingName = '';
   }
   return out;
+}
+
+// Confidence alone is insufficient: plausible prices must also reconcile with the receipt.
+export function assessReceipt(receipt: ParsedReceipt, confidence: number) {
+  const subtotal = receipt.items.reduce((sum, item) => sum + item.amount, 0);
+  const calculated = subtotal - receipt.discount + receipt.service + receipt.tax + receipt.rounding;
+  const totalMatches = receipt.total !== null && calculated === receipt.total;
+  const subtotalMatches = receipt.subtotal !== null && subtotal === receipt.subtotal;
+  const suspicious = receipt.items.filter(item => item.amount < 100 || !/[aeiou]/i.test(item.name) || /([a-z])\1{3,}/i.test(item.name) || /(?:\b[a-z]{1,2}\b\s*){4}/i.test(item.name)).length;
+  const issues: string[] = [];
+  if (!receipt.items.length) issues.push('empty');
+  if (confidence < 70) issues.push('clarity');
+  if (suspicious) issues.push('names');
+  if (receipt.subtotal !== null && !subtotalMatches) issues.push('subtotal');
+  if (receipt.total !== null && !totalMatches) issues.push('total');
+  if (receipt.total === null && receipt.subtotal === null) issues.push('noTotal');
+  const usable = receipt.items.length > 0 && confidence >= 45 && suspicious < receipt.items.length;
+  const score = confidence + (totalMatches ? 45 : receipt.total !== null ? -30 : 0) + (subtotalMatches ? 20 : receipt.subtotal !== null ? -20 : 0) + Math.min(receipt.items.length, 10) * 2 - suspicious * 20 - (!receipt.items.length ? 100 : 0);
+  return { usable, issues, score, subtotal, calculated, totalMatches, subtotalMatches };
 }
