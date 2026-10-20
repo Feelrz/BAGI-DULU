@@ -565,7 +565,7 @@ export default function MoneyApp() {
 
   useEffect(() => {
     if (!("serviceWorker" in navigator)) return;
-    navigator.serviceWorker.register("/sw.js").catch(() => undefined);
+    navigator.serviceWorker.register("/sw.js", { updateViaCache: "none" }).then(registration => registration.update()).catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -1131,7 +1131,7 @@ export default function MoneyApp() {
         </section>
       )}
 
-      <footer className="footer"><span>BAGI DULU V6.0.1</span><p>{bi(language, "money, before it disappears · local-first · bilingual · PWA-ready", "money, before it disappears · local-first · bilingual · PWA-ready")}</p></footer>
+      <footer className="footer"><span>BAGI DULU V6.0.2</span><p>{bi(language, "money, before it disappears · local-first · bilingual · PWA-ready", "money, before it disappears · local-first · bilingual · PWA-ready")}</p></footer>
       <div className={toast ? "toast show" : "toast"} role="status" aria-live="polite">{toast}</div>
     </main>
   );

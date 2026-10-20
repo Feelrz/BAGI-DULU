@@ -5,9 +5,10 @@ export type SplitBill = {
   id: string; title: string; date: string; people: Person[]; items: BillItem[];
   mode: 'items' | 'equal'; discount: Charge; service: Charge; tax: Charge;
   taxOnService: boolean; extra: number; rounding?: number; payerId: string; expectedTotal: number | null;
-  fromScan: boolean; reviewed: boolean; savedAt?: string;
+  fromScan: boolean; reviewed: boolean; scanEngine?: string; scannedAt?: string; savedAt?: string;
 };
 export const MAX_MONEY = 1_000_000_000;
+export const SCAN_ENGINE_VERSION = '6.0.2';
 export const newId = () => globalThis.crypto?.randomUUID?.() || 'b-' + Date.now().toString(36) + Math.random().toString(36).slice(2);
 const nonnegative = (v: unknown, max = MAX_MONEY) => Math.min(max, Math.max(0, Number(v) || 0));
 export const rupiah = (v: unknown) => Math.round(nonnegative(v));
@@ -38,7 +39,7 @@ export function normalizeBill(value: unknown): SplitBill | null {
     return { id, name: String(i.name || '').slice(0, 80), quantity: Math.max(1, Math.round(nonnegative(i.quantity, 999))), amount: rupiah(i.amount), personIds: Array.from(new Set(Array.isArray(i.personIds) ? i.personIds.filter(id => ids.has(id)) : [])) };
   });
   const charge = (v: Charge | undefined): Charge => ({ value: nonnegative(v?.value, v?.mode === 'percent' ? 100 : MAX_MONEY), mode: v?.mode === 'percent' ? 'percent' : 'amount' });
-  return { ...newBill(), id: String(b.id || newId()).slice(0, 80), title: String(b.title || '').slice(0, 80), date: /^\d{4}-\d{2}-\d{2}$/.test(String(b.date)) ? b.date! : newBill().date, people, items, mode: b.mode === 'equal' ? 'equal' : 'items', discount: charge(b.discount), service: charge(b.service), tax: charge(b.tax), taxOnService: b.taxOnService === true, extra: rupiah(b.extra), rounding: roundingAmount(b.rounding), payerId: ids.has(b.payerId || '') ? b.payerId! : '', expectedTotal: b.expectedTotal == null ? null : rupiah(b.expectedTotal), fromScan: b.fromScan === true, reviewed: b.reviewed !== false, savedAt: typeof b.savedAt === 'string' ? b.savedAt : undefined };
+  return { ...newBill(), id: String(b.id || newId()).slice(0, 80), title: String(b.title || '').slice(0, 80), date: /^\d{4}-\d{2}-\d{2}$/.test(String(b.date)) ? b.date! : newBill().date, people, items, mode: b.mode === 'equal' ? 'equal' : 'items', discount: charge(b.discount), service: charge(b.service), tax: charge(b.tax), taxOnService: b.taxOnService === true, extra: rupiah(b.extra), rounding: roundingAmount(b.rounding), payerId: ids.has(b.payerId || '') ? b.payerId! : '', expectedTotal: b.expectedTotal == null ? null : rupiah(b.expectedTotal), fromScan: b.fromScan === true, reviewed: b.reviewed !== false, scanEngine: typeof b.scanEngine === 'string' ? b.scanEngine.slice(0, 30) : undefined, scannedAt: typeof b.scannedAt === 'string' ? b.scannedAt.slice(0, 40) : undefined, savedAt: typeof b.savedAt === 'string' ? b.savedAt : undefined };
 }
 // Largest remainder allocation. Ties follow participant order; totals stay exact in whole rupiah.
 export function allocate(total: number, weights: number[]): number[] {
@@ -84,6 +85,7 @@ export function calculateBill(b: SplitBill) {
   if (unassigned) issues.push('unassigned');
   if (requestedDiscount > subtotal) issues.push('discount');
   if (b.fromScan && !b.reviewed) issues.push('review');
+  if (b.fromScan && b.items.some(receiptItemLooksCorrupt)) issues.push('scanCorrupt');
   if (mismatch !== null && mismatch !== 0) issues.push('mismatch');
   if (net + service + tax + extra + rounding < 0) issues.push('rounding');
   if (total > MAX_MONEY) issues.push('limit');
@@ -146,7 +148,7 @@ export function parseReceipt(text: string): ParsedReceipt {
     if (trailingQuantity) { quantity = Math.max(1, Number(trailingQuantity[1])); name = name.slice(0, trailingQuantity.index).trim(); }
     // 2 x 25000 [50000] under a standalone item name.
     if ((!name || /^[\d\s.,xX×@]+$/.test(name)) && pendingName) { name = pendingName; const q = lead.match(/^(\d{1,3})\s*[xX×@]/); if (q) quantity = Number(q[1]); }
-    name = name.replace(/\s+@?\s*(?:Rp\.?\s*)?\d[\d.,]*\s*$/i, '').replace(/[|¦:=]+$/, '').replace(/\s+/g, ' ').trim();
+    name = name.replace(/\s+@?\s*(?:Rp\.?\s*)?\d[\d.,]*\s*$/i, '').replace(/[|¦:=]+$/, '').replace(/\s+[.,;:]+$/, '').replace(/\s+/g, ' ').trim();
     if (amount > 0 && /[A-Za-z]/.test(name) && name.length >= 2 && !/[=|_~]{2,}/.test(name)) out.items.push({ id: newId(), name: name.slice(0, 80), quantity, amount, personIds: [] });
     else out.skipped.push(line);
     pendingName = '';
@@ -154,21 +156,29 @@ export function parseReceipt(text: string): ParsedReceipt {
   return out;
 }
 
+export function receiptItemLooksCorrupt(item: BillItem) {
+  const words = item.name.toLowerCase().match(/[a-z]+/g) || [];
+  const letters = words.join('');
+  const repeated = words.filter(word => /^([a-z])\1{2,}$/.test(word)).length >= 2;
+  const alphabetNoise = words.length >= 5 && words.filter(word => word.length <= 3).length / words.length >= .8;
+  const dominated = letters.length >= 6 && [...new Set(letters)].some(letter => letters.split(letter).length - 1 > letters.length * .7);
+  return !letters || repeated || alphabetNoise || dominated || item.amount < 100 || (item.quantity > 50 && item.amount < 1000);
+}
 // Confidence alone is insufficient: plausible prices must also reconcile with the receipt.
 export function assessReceipt(receipt: ParsedReceipt, confidence: number) {
   const subtotal = receipt.items.reduce((sum, item) => sum + item.amount, 0);
   const calculated = subtotal - receipt.discount + receipt.service + receipt.tax + receipt.rounding;
   const totalMatches = receipt.total !== null && calculated === receipt.total;
   const subtotalMatches = receipt.subtotal !== null && subtotal === receipt.subtotal;
-  const suspicious = receipt.items.filter(item => item.amount < 100 || !/[aeiou]/i.test(item.name) || /([a-z])\1{3,}/i.test(item.name) || /(?:\b[a-z]{1,2}\b\s*){4}/i.test(item.name)).length;
+  const suspicious = receipt.items.filter(receiptItemLooksCorrupt).length;
   const issues: string[] = [];
   if (!receipt.items.length) issues.push('empty');
   if (confidence < 70) issues.push('clarity');
   if (suspicious) issues.push('names');
   if (receipt.subtotal !== null && !subtotalMatches) issues.push('subtotal');
   if (receipt.total !== null && !totalMatches) issues.push('total');
-  if (receipt.total === null && receipt.subtotal === null) issues.push('noTotal');
-  const usable = receipt.items.length > 0 && confidence >= 45 && suspicious < receipt.items.length;
+  if (receipt.total === null) issues.push('noTotal');
+  const usable = receipt.items.length > 0 && confidence >= 60 && suspicious === 0;
   const score = confidence + (totalMatches ? 45 : receipt.total !== null ? -30 : 0) + (subtotalMatches ? 20 : receipt.subtotal !== null ? -20 : 0) + Math.min(receipt.items.length, 10) * 2 - suspicious * 20 - (!receipt.items.length ? 100 : 0);
   return { usable, issues, score, subtotal, calculated, totalMatches, subtotalMatches };
 }

@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import ts from 'typescript';
 const source = await readFile(new URL('../lib/splitbill.ts', import.meta.url), 'utf8');
 const compiled = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.ESNext } }).outputText;
-const { newBill, calculateBill, allocate, parseReceipt, parseReceiptMoney, normalizeBill, assessReceipt } = await import('data:text/javascript;base64,' + Buffer.from(compiled).toString('base64'));
+const { newBill, calculateBill, allocate, parseReceipt, parseReceiptMoney, normalizeBill, assessReceipt, receiptItemLooksCorrupt, SCAN_ENGINE_VERSION } = await import('data:text/javascript;base64,' + Buffer.from(compiled).toString('base64'));
 let count = 0;
 function test(name, fn) { fn(); count++; console.log('PASS ' + name); }
 const a = { id: 'a', name: 'Ayu' }, b = { id: 'b', name: 'Bimo' }, c = { id: 'c', name: 'Caca' };
@@ -86,6 +86,7 @@ test('OCR junk and incomplete or mismatched receipts cannot pass quietly', () =>
   assert.equal(assessReceipt(junk,31).usable,false);
   assert(assessReceipt(parseReceipt('Kopi 25,000\nTotal 50,000'),90).issues.includes('total'));
   assert(assessReceipt(parseReceipt('Kopi 25,000'),95).issues.includes('noTotal'));
+  assert(assessReceipt(parseReceipt('Kopi 25,000\nSubtotal 25,000'),95).issues.includes('noTotal'));
   assert.equal(parseReceipt('ITEMS: 6\nOVO 86,000').items.length,0);
   assert.equal(parseReceipt('Kopi 25,000\nPbl 10% 2,500\nTotal 27,500').tax,2500);
 });
@@ -94,5 +95,21 @@ test('Signed rounding survives autosave normalization and old bills still work',
   assert.equal(calculateBill(bill({rounding:undefined})).total,100000);
   assert(calculateBill(bill({items:[item('Tiny',100,['a'])],rounding:-200})).issues.includes('rounding'));
   assert.equal(parseReceipt('Sup Ayam | 2 47,274').items[0].name,'Sup Ayam');
+});
+test('Exact garbage patterns in the reported screenshot are blocked even at high confidence', () => {
+  const names=['le EEE EEE','EEE HEE Ea RE ES Ee a Br os : HE','aN eee Eee a'];
+  const broken=names.map((name,i)=>({...item(String(i),i===2?186:3,[]),name,quantity:i===2?78:1}));
+  assert(broken.every(receiptItemLooksCorrupt));
+  const mixed={items:[...broken,item('Es Teh',10000,[])],tax:0,service:0,discount:0,rounding:0,total:null,subtotal:null,skipped:[]};
+  assert.equal(assessReceipt(mixed,99).usable,false);
+  const r=calculateBill(bill({items:broken,fromScan:true,reviewed:true}));assert(r.issues.includes('scanCorrupt'));
+  assert.equal(receiptItemLooksCorrupt(item('Es Teh Manis',16364,[],2)),false);
+  assert.equal(receiptItemLooksCorrupt(item('Baterai AAA',10000,[],2)),false);
+  assert.equal(parseReceipt('Nasi Putih . 2 14,548').items[0].name,'Nasi Putih');
+});
+test('Scan engine metadata survives draft reload and manual correction restores validity', () => {
+  const n=normalizeBill(bill({fromScan:true,scanEngine:SCAN_ENGINE_VERSION,scannedAt:'2026-10-19T00:00:00.000Z'}));
+  assert.equal(n.scanEngine,SCAN_ENGINE_VERSION);assert.equal(n.scannedAt,'2026-10-19T00:00:00.000Z');
+  assert.equal(calculateBill({...n,reviewed:true}).issues.includes('scanCorrupt'),false);
 });
 console.log('\n' + count + ' test groups passed.');

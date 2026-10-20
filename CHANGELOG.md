@@ -1,3 +1,12 @@
+# V6.0.2 — 2026-10-20
+
+- Kurangi noise foto dengan filter median, pertahankan gambar asli sebagai alternatif, dan pakai pembesaran piksel yang sama pada browser dan uji OCR.
+- Baca ulang gambar bersih dengan tata letak kolom struk. Hasil dengan item valid diprioritaskan; subtotal saja tidak dianggap sebagai total akhir.
+- Tolak teks acak dan nominal tidak masuk akal sebelum impor. Tandai draft scan lama yang terindikasi rusak tanpa menghapus data pengguna.
+- Tambah tombol atur area dan baca ulang dari foto asli; tampilkan versi scanner agar pembaruan mudah dikenali.
+- Uji OCR sekarang menjalankan fungsi pemrosesan gambar produksi, bukan pembesaran gambar khusus pengujian.
+- Perbarui cache aplikasi dan pemeriksaan pembaruan service worker.
+
 # V6.0.1 — 2026-10-19
 
 - Kamera HP memakai pengambilan foto native; desktop memakai foto resolusi penuh jika didukung.

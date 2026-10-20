@@ -670,3 +670,8 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
   .sb-photo-tools > .primary-btn { width: 100%; min-height: 46px; }
   .sb-photo-tools .ghost-btn { min-height: 44px; }
 }
+.sb-scanner-version { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; color: var(--muted); font: 700 10px/1.5 ui-monospace, monospace; }
+.sb-scanner-version > span:first-child { color: var(--text); }
+.sb-corrupt-scan { margin: 0 0 18px; }
+.sb-corrupt-scan p { font-size: 12px; line-height: 1.7; }
+.sb-item-corrupt { border-color: var(--warning); }

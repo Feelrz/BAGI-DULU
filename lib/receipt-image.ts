@@ -29,34 +29,71 @@ export async function preparePhoto(file: Blob, rotation = 0, crop: Crop = FULL_C
   result.getContext('2d')!.drawImage(source, source.width * left, source.height * top, source.width * width, source.height * height, 0, 0, result.width, result.height);
   return canvasBlob(result);
 }
-// Mild smoothing suppresses camera/screen grain; percentile contrast keeps faint ink.
-// The original remains a separate OCR candidate so enhancement cannot discard it.
+// A median filter suppresses screen/camera speckle without averaging it into
+// letter edges. Keep the original as another candidate: thin print may need it.
 export function enhanceReceiptPixels(data: Uint8ClampedArray, width: number, height: number) {
   const gray = new Uint8Array(width * height);
   for (let i = 0; i < gray.length; i++) gray[i] = Math.round(.299 * data[i * 4] + .587 * data[i * 4 + 1] + .114 * data[i * 4 + 2]);
-  const smooth = new Uint8Array(gray.length); const histogram = new Uint32Array(256);
-  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
-    const i = y * width + x;
-    const value = Math.round((gray[i] * 4 + gray[y * width + Math.max(0, x - 1)] + gray[y * width + Math.min(width - 1, x + 1)] + gray[Math.max(0, y - 1) * width + x] + gray[Math.min(height - 1, y + 1) * width + x]) / 8);
-    smooth[i] = value; histogram[value]++;
+  const neighbors = new Uint8Array(9);
+  for (let y = 1; y < height - 1; y++) for (let x = 1; x < width - 1; x++) {
+    let n = 0;
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) neighbors[n++] = gray[(y + dy) * width + x + dx];
+    neighbors.sort();
+    const p = (y * width + x) * 4;
+    data[p] = data[p + 1] = data[p + 2] = neighbors[4]; data[p + 3] = 255;
   }
-  function percentile(percent: number) { let count = 0; for (let i = 0; i < 256; i++) { count += histogram[i]; if (count >= gray.length * percent) return i; } return 255; }
-  const low = percentile(.02), high = percentile(.9), range = Math.max(30, high - low);
-  for (let i = 0; i < gray.length; i++) { const value = Math.max(0, Math.min(255, (smooth[i] - low) * 255 / range)); data[i * 4] = value; data[i * 4 + 1] = value; data[i * 4 + 2] = value; data[i * 4 + 3] = 255; }
   return data;
+}
+// Use the same pixel resampling in the browser and OCR regression tests. Canvas
+// interpolation varies by engine and can erase the thin strokes of small text.
+// Catmull-Rom cubic interpolation retains the original colour and a white border.
+export function rasterizeReceipt(data: Uint8ClampedArray, width: number, height: number, targetWidth?: number) {
+  const scale = Math.min(Math.max(1, (targetWidth || 1400) / width), 3600 / Math.max(width, height), Math.sqrt(5_000_000 / (width * height)));
+  const w = Math.max(1, Math.round(width * scale)), h = Math.max(1, Math.round(height * scale));
+  function kernel(value: number) { const x = Math.abs(value); return x <= 1 ? 1.5 * x ** 3 - 2.5 * x ** 2 + 1 : x < 2 ? -.5 * x ** 3 + 2.5 * x ** 2 - 4 * x + 2 : 0; }
+  function weights(source: number, target: number) {
+    const ratio = source / target, support = Math.max(1, ratio);
+    return Array.from({ length: target }, (_, index) => {
+      const center = (index + .5) * ratio - .5, entries: [number, number][] = [];
+      let sum = 0;
+      for (let i = Math.ceil(center - 2 * support); i <= Math.floor(center + 2 * support); i++) {
+        const weight = kernel((center - i) / support);
+        if (weight === 0) continue;
+        entries.push([Math.max(0, Math.min(source - 1, i)), weight]); sum += weight;
+      }
+      return entries.map(([i, weight]) => [i, weight / sum] as const);
+    });
+  }
+  const horizontal = new Float32Array(w * height), wx = weights(width, w), wy = weights(height, h);
+  const outputWidth = w + 32, outputHeight = h + 32;
+  const pixels = new Uint8ClampedArray(outputWidth * outputHeight * 4); pixels.fill(255);
+  // Reuse one intermediate channel to limit memory on mobile devices.
+  for (let channel = 0; channel < 3; channel++) {
+    for (let y = 0; y < height; y++) for (let x = 0; x < w; x++) {
+      let sum = 0; for (const [i, weight] of wx[x]) sum += data[(y * width + i) * 4 + channel] * weight;
+      horizontal[y * w + x] = sum;
+    }
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      let sum = 0; for (const [i, weight] of wy[y]) sum += horizontal[i * w + x] * weight;
+      pixels[((y + 16) * outputWidth + x + 16) * 4 + channel] = sum;
+    }
+  }
+  return { pixels, width: outputWidth, height: outputHeight };
 }
 export async function prepareScanImages(file: Blob) {
   const image = await loadImage(file);
   const w = image.naturalWidth, h = image.naturalHeight;
-  const scale = Math.min(Math.max(1, 1400 / w), 3600 / Math.max(w, h), Math.sqrt(5_000_000 / (w * h)));
   const source = document.createElement('canvas'); source.width = w; source.height = h;
   const sourceContext = source.getContext('2d', { willReadFrequently: true })!;
   sourceContext.fillStyle = '#fff'; sourceContext.fillRect(0, 0, w, h); sourceContext.drawImage(image, 0, 0);
-  const target = document.createElement('canvas'); target.width = Math.round(w * scale) + 32; target.height = Math.round(h * scale) + 32;
-  const context = target.getContext('2d')!;
-  function draw() { context.fillStyle = '#fff'; context.fillRect(0, 0, target.width, target.height); context.imageSmoothingEnabled = true; context.imageSmoothingQuality = 'high'; context.drawImage(source, 16, 16, target.width - 32, target.height - 32); }
-  draw(); const original = await canvasBlob(target);
-  const pixels = sourceContext.getImageData(0, 0, w, h); enhanceReceiptPixels(pixels.data, w, h); sourceContext.putImageData(pixels, 0, 0);
-  draw(); const enhanced = await canvasBlob(target);
+  const data = sourceContext.getImageData(0, 0, w, h).data;
+  async function render(pixels: Uint8ClampedArray) {
+    const raster = rasterizeReceipt(pixels, w, h);
+    const target = document.createElement('canvas'); target.width = raster.width; target.height = raster.height;
+    target.getContext('2d')!.putImageData(new ImageData(raster.pixels as Uint8ClampedArray<ArrayBuffer>, raster.width, raster.height), 0, 0);
+    return canvasBlob(target);
+  }
+  const original = await render(data);
+  const enhanced = await render(enhanceReceiptPixels(data, w, h));
   return { original, enhanced };
 }
