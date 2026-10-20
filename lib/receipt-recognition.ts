@@ -14,6 +14,7 @@ export function receiptRows(blocks: Block[] | null | undefined) {
 }
 export async function recognizeReceipt(worker: Worker, images: { original: ImageLike; enhanced: ImageLike }, onAttempt: (attempt: number) => void = () => {}) {
   let best: { text: string; confidence: number; receipt: ReturnType<typeof parseReceipt>; assessment: ReturnType<typeof assessReceipt> } | undefined;
+  let currencyWarning = false;
   const attempts = [{ image: images.original, mode: '6', threshold: '0' }, { image: images.enhanced, mode: '4', threshold: '2' }, { image: images.original, mode: '4', threshold: '2' }];
   for (let i = 0; i < attempts.length; i++) {
     onAttempt(i);
@@ -22,11 +23,13 @@ export async function recognizeReceipt(worker: Worker, images: { original: Image
     const { data } = await worker.recognize(attempt.image, { rotateAuto: true }, { text: true, blocks: true });
     for (const text of [data.text, receiptRows(data.blocks)]) {
       const receipt = parseReceipt(text), assessment = assessReceipt(receipt, data.confidence);
+      currencyWarning ||= receipt.currencyWarning === true;
       // A high OCR confidence cannot make corrupt item names a better candidate.
       if (!best || (assessment.usable && !best.assessment.usable) || (assessment.usable === best.assessment.usable && assessment.score > best.assessment.score)) best = { text, confidence: data.confidence, receipt, assessment };
     }
     if (best && best.assessment.issues.length === 0 && best.confidence >= 80) break;
   }
   if (!best) throw new Error('empty');
+  if (currencyWarning) { best.receipt.currencyWarning = true; best.assessment = assessReceipt(best.receipt, best.confidence); }
   return best;
 }

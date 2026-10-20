@@ -1,10 +1,10 @@
-## Perbaikan scanner V6.0.2
+## Review scanner V6.1.0
 
-Di PATUNGAN, pilih **scan struk** atau **unggah foto**. Pada HP, scan membuka kamera bawaan. Geser sudut untuk menyisakan area struk, putar jika perlu, lalu pilih **BACA AREA INI**. Pastikan harga dan total tidak terpotong. Periksa tabel hasil dan pilih **MASUKKAN KE TAGIHAN**. Hasil yang kurang jelas memerlukan pemeriksaan; foto yang tidak terbaca tidak dapat diimpor. Koreksi form lalu konfirmasi pemeriksaan struk sebelum menyimpan/membagikan.
+Di PATUNGAN, pilih **scan struk** atau **unggah foto**. Pada HP, scan membuka kamera bawaan. Geser sudut untuk menyisakan area struk, putar jika perlu, lalu pilih **BACA AREA INI**. Pastikan harga dan total tidak terpotong. Edit nama, jumlah, total baris, dan biaya langsung di hasil scan. Tambah item yang terlewat atau hapus baris yang keliru (tersedia urungkan). Cocokkan dengan foto, pastikan total sesuai, centang pemeriksaan, lalu pilih **MASUKKAN KE TAGIHAN**. Kolom tidak valid dan selisih total menahan impor. Koreksi belum mengubah draft sampai diterima; perubahan angka sesudah impor meminta pemeriksaan ulang.
 
 OCR tetap berjalan di perangkat dan tidak memerlukan API key. Hasil bisa keliru pada foto buram, silau, miring, atau foto layar. Scanner mencoba beberapa versi gambar dan memeriksa subtotal/total, tetapi pengguna tetap perlu mencocokkan hasil dengan struk. Pembulatan seperti `-5` dapat diisi pada kolom pembulatan.
 
-Jika draft masih berisi teks acak dari scan sebelumnya, pilih **PILIH FOTO & SCAN ULANG**. Memuat ulang halaman memperbarui aplikasi, tetapi tidak membaca ulang foto lama. Hasil baru menggantikan draft hanya setelah diterima. Pilih **Atur area & baca ulang** untuk mencoba lagi dari foto asli.
+Jika draft masih berisi teks acak dari scan sebelumnya, pilih **PILIH FOTO & SCAN ULANG**. Memuat ulang halaman memperbarui aplikasi, tetapi tidak membaca ulang foto lama. Hasil baru menggantikan draft hanya setelah diterima. Pemindai saat ini khusus rupiah; indikasi struk luar negeri ditandai dan tidak otomatis dikonversi atau diimpor sebagai Rp. Pilih **Atur area & baca ulang** untuk mencoba lagi dari foto asli.
 
 Uji dengan `npm test`, `npm run build`, lalu `npm run test:ocr`. Uji OCR memakai pembesaran/filter produksi; Sharp hanya membaca dan menulis PNG. Foto pengguna tidak disertakan dalam repository.
 

@@ -1,3 +1,12 @@
+# V6.1.0 — 2026-10-20
+
+- Tambah review yang dapat diedit sebelum impor, foto pembanding, penanda kolom bermasalah, item tambahan, hapus/urungkan, serta rincian seluruh biaya.
+- Hitung selisih subtotal/total saat edit. Impor memerlukan data valid, total cocok, dan konfirmasi; edit membatalkan konfirmasi sebelumnya.
+- Draft tagihan tidak berubah selama review atau ketika hasil dibatalkan. Koreksi angka sesudah impor meminta pemeriksaan ulang.
+- Pertahankan angka pada nama produk jika jumlah sudah ada di awal baris, abaikan metadata kartu/alamat dan ringkasan pembayaran, serta hindari menambahkan ulang pajak yang dirinci setelah total.
+- Tandai indikasi mata uang selain rupiah. Belum ada dukungan multi-mata-uang atau konversi otomatis.
+- Tambah regresi review, format struk dan perlindungan impor; uji foto gelap, struk panjang luar negeri, dan foto miring/tertutup tanpa menyimpan foto pengguna di repository.
+
 # V6.0.2 — 2026-10-20
 
 - Kurangi noise foto dengan filter median, pertahankan gambar asli sebagai alternatif, dan pakai pembesaran piksel yang sama pada browser dan uji OCR.

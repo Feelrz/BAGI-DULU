@@ -8,7 +8,7 @@ export type SplitBill = {
   fromScan: boolean; reviewed: boolean; scanEngine?: string; scannedAt?: string; savedAt?: string;
 };
 export const MAX_MONEY = 1_000_000_000;
-export const SCAN_ENGINE_VERSION = '6.0.2';
+export const SCAN_ENGINE_VERSION = '6.1.0';
 export const newId = () => globalThis.crypto?.randomUUID?.() || 'b-' + Date.now().toString(36) + Math.random().toString(36).slice(2);
 const nonnegative = (v: unknown, max = MAX_MONEY) => Math.min(max, Math.max(0, Number(v) || 0));
 export const rupiah = (v: unknown) => Math.round(nonnegative(v));
@@ -102,12 +102,17 @@ export function parseReceiptMoney(input: string): number | null {
   const n = Number(s);
   return Number.isFinite(n) && n <= MAX_MONEY ? Math.round(n) * (negative ? -1 : 1) : null;
 }
-export type ParsedReceipt = { items: BillItem[]; tax: number; service: number; discount: number; rounding: number; total: number | null; subtotal: number | null; skipped: string[] };
+export type ParsedReceipt = { items: BillItem[]; tax: number; service: number; discount: number; rounding: number; total: number | null; subtotal: number | null; skipped: string[]; currencyWarning?: boolean };
 export function parseReceipt(text: string): ParsedReceipt {
   const out: ParsedReceipt = { items: [], tax: 0, service: 0, discount: 0, rounding: 0, total: null, subtotal: null, skipped: [] };
   const lines = text.replace(/\r/g, '').split('\n').map(l => l.trim()).filter(Boolean);
+  const header = lines.slice(0, 12).join(' ');
+  // No implicit currency conversion. An overseas venue is only a hint, so the
+  // UI explains the limitation instead of presenting its figures as rupiah.
+  if (/\b(?:AED|USD|SGD|MYR|EUR|GBP|THB|DHS|DIRHAMS?)\b/i.test(text) || (/\b(?:Dubai|Jumeirah|Abu Dhabi)\b/i.test(header) && /\b(?:TRN|BOX)\b/i.test(header))) out.currencyWarning = true;
   let pendingName = '';
   let footer = false;
+  let paymentSection = false;
   for (const line of lines) {
     const match = line.match(/(-?\s*(?:Rp\.?\s*)?\d[\d.,]*)\s*(?:[A-Z*])?\s*$/i);
     if (!match) {
@@ -132,10 +137,11 @@ export function parseReceipt(text: string): ParsedReceipt {
     }
     if (/^(sub\s*total|subtotal)\b/.test(lower)) { out.subtotal = Math.abs(amount); footer = true; pendingName = ''; continue; }
     if (/^(grand\s*total|total\s*(bayar|payment|tagihan|due)?|amount\s*due|jumlah\s*(bayar|tagihan))\s*[:=]?\s*$/.test(lower)) { out.total = Math.abs(amount); footer = true; pendingName = ''; continue; }
-    if (/^(pajak|tax|ppn|pb[1il]|pbjt|vat)\b/.test(lower)) { out.tax += Math.abs(amount); footer = true; pendingName = ''; continue; }
-    if (/^(service|servis|svc|layanan)\b/.test(lower)) { out.service += Math.abs(amount); footer = true; pendingName = ''; continue; }
-    if (/^(discount|diskon|disc|potongan)\b/.test(lower)) { out.discount += Math.abs(amount); pendingName = ''; continue; }
-    if (/\b(cash|tunai|change|kembali|kembalian|debit|credit|kredit|qris|visa|mastercard|payment|bayar|tender|telp|phone|npwp|kasir|cashier|meja|table|receipt|invoice|order|ref|customer|date|tanggal|ovo|gopay|shopeepay|dana)\b/i.test(lead) || /\d[:/]\d/.test(line) || /^\s*(no\.?|nomor|jl\.?|jalan)\b/i.test(lead)) { pendingName = ''; continue; }
+    if (/^(pajak|tax|ppn|pb[1il]|pbjt|vat|municip\.?\s*tax)\b/.test(lower)) { if (out.total === null && !paymentSection) out.tax += Math.abs(amount); else out.skipped.push(line); footer = true; pendingName = ''; continue; }
+    if (/^(service|servis|svc|layanan|charged\s*tips?|tips?|gratuity)\b/.test(lower)) { if (out.total === null && !paymentSection) out.service += Math.abs(amount); else out.skipped.push(line); footer = true; pendingName = ''; continue; }
+    if (/^(discount|diskon|disc|potongan)\b/.test(lower)) { if (out.total === null && !paymentSection) out.discount += Math.abs(amount); else out.skipped.push(line); pendingName = ''; continue; }
+    if (/\b(american\s*exp(?:ress)?|amex|cash|tunai|change|kembali|kembalian|debit|credit|kredit|qris|visa|mastercard|payment|bayar|tender|ovo|gopay|shopeepay|dana)\b/i.test(lead)) { if (out.items.length) { footer = true; paymentSection = true; } pendingName = ''; continue; }
+    if (/\b(telp|phone|npwp|trn|box|card|kasir|cashier|meja|table|receipt|invoice|order|ref|customer|date|tanggal)\b/i.test(lead) || /\d[:/]\d/.test(line) || /^\s*(no\.?|nomor|jl\.?|jalan)\b/i.test(lead)) { pendingName = ''; continue; }
     if (footer) { out.skipped.push(line); pendingName = ''; continue; }
     let name = lead;
     let quantity = 1;
@@ -143,12 +149,14 @@ export function parseReceipt(text: string): ParsedReceipt {
     if (start) { quantity = Math.max(1, Number(start[1])); name = name.slice(start[0].length); }
     // NAME 2 x 25.000 [50.000] or NAME 2 25.000 [50.000].
     const columns = name.match(/\s+(\d{1,3})\s*(?:[xX×@]\s*|\s+)(?:Rp\.?\s*)?\d[\d.,]*\s*$/i);
-    if (columns) { quantity = Math.max(1, Number(columns[1])); name = name.slice(0, columns.index).trim(); }
+    if (columns && !start) { quantity = Math.max(1, Number(columns[1])); name = name.slice(0, columns.index).trim(); }
     const trailingQuantity = name.match(/\s+(?:[xX×]\s*)?(\d{1,3})\s*$/);
-    if (trailingQuantity) { quantity = Math.max(1, Number(trailingQuantity[1])); name = name.slice(0, trailingQuantity.index).trim(); }
+    if (trailingQuantity && !start) { quantity = Math.max(1, Number(trailingQuantity[1])); name = name.slice(0, trailingQuantity.index).trim(); }
     // 2 x 25000 [50000] under a standalone item name.
     if ((!name || /^[\d\s.,xX×@]+$/.test(name)) && pendingName) { name = pendingName; const q = lead.match(/^(\d{1,3})\s*[xX×@]/); if (q) quantity = Number(q[1]); }
-    name = name.replace(/\s+@?\s*(?:Rp\.?\s*)?\d[\d.,]*\s*$/i, '').replace(/[|¦:=]+$/, '').replace(/\s+[.,;:]+$/, '').replace(/\s+/g, ' ').trim();
+    // With an explicit leading quantity, bare trailing numbers may be sizes or
+    // vintages ("1 Water 800", "2 Petrus 2009"). Strip only marked unit prices.
+    name = name.replace(start ? /\s+(?:@\s*\d[\d.,]*|Rp\.?\s*\d[\d.,]*|\d+[.,]\d[\d.,]*)\s*$/i : /\s+@?\s*(?:Rp\.?\s*)?\d[\d.,]*\s*$/i, '').replace(/[|¦:=]+$/, '').replace(/\s+[.,;:]+$/, '').replace(/\s+/g, ' ').trim();
     if (amount > 0 && /[A-Za-z]/.test(name) && name.length >= 2 && !/[=|_~]{2,}/.test(name)) out.items.push({ id: newId(), name: name.slice(0, 80), quantity, amount, personIds: [] });
     else out.skipped.push(line);
     pendingName = '';
@@ -156,13 +164,16 @@ export function parseReceipt(text: string): ParsedReceipt {
   return out;
 }
 
-export function receiptItemLooksCorrupt(item: BillItem) {
-  const words = item.name.toLowerCase().match(/[a-z]+/g) || [];
+export function receiptItemNameLooksCorrupt(name: string) {
+  const words = name.toLowerCase().match(/[a-z]+/g) || [];
   const letters = words.join('');
   const repeated = words.filter(word => /^([a-z])\1{2,}$/.test(word)).length >= 2;
   const alphabetNoise = words.length >= 5 && words.filter(word => word.length <= 3).length / words.length >= .8;
   const dominated = letters.length >= 6 && [...new Set(letters)].some(letter => letters.split(letter).length - 1 > letters.length * .7);
-  return !letters || repeated || alphabetNoise || dominated || item.amount < 100 || (item.quantity > 50 && item.amount < 1000);
+  return !letters || repeated || alphabetNoise || dominated;
+}
+export function receiptItemLooksCorrupt(item: BillItem) {
+  return receiptItemNameLooksCorrupt(item.name) || item.amount < 100 || (item.quantity > 50 && item.amount < 1000);
 }
 // Confidence alone is insufficient: plausible prices must also reconcile with the receipt.
 export function assessReceipt(receipt: ParsedReceipt, confidence: number) {
@@ -172,13 +183,14 @@ export function assessReceipt(receipt: ParsedReceipt, confidence: number) {
   const subtotalMatches = receipt.subtotal !== null && subtotal === receipt.subtotal;
   const suspicious = receipt.items.filter(receiptItemLooksCorrupt).length;
   const issues: string[] = [];
+  if (receipt.currencyWarning) issues.push('currency');
   if (!receipt.items.length) issues.push('empty');
   if (confidence < 70) issues.push('clarity');
   if (suspicious) issues.push('names');
   if (receipt.subtotal !== null && !subtotalMatches) issues.push('subtotal');
   if (receipt.total !== null && !totalMatches) issues.push('total');
   if (receipt.total === null) issues.push('noTotal');
-  const usable = receipt.items.length > 0 && confidence >= 60 && suspicious === 0;
+  const usable = receipt.items.length > 0 && confidence >= 60 && suspicious === 0 && !receipt.currencyWarning;
   const score = confidence + (totalMatches ? 45 : receipt.total !== null ? -30 : 0) + (subtotalMatches ? 20 : receipt.subtotal !== null ? -20 : 0) + Math.min(receipt.items.length, 10) * 2 - suspicious * 20 - (!receipt.items.length ? 100 : 0);
   return { usable, issues, score, subtotal, calculated, totalMatches, subtotalMatches };
 }

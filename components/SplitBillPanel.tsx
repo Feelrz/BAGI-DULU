@@ -1,8 +1,9 @@
 'use client';
 import { ChangeEvent, Dispatch, SetStateAction, useEffect, useMemo, useRef, useState } from 'react';
-import { BillItem, Charge, SplitBill, calculateBill, newBill, newId, rupiah, roundingAmount, receiptItemLooksCorrupt, SCAN_ENGINE_VERSION } from '../lib/splitbill';
+import { BillItem, Charge, ParsedReceipt, SplitBill, calculateBill, newBill, newId, rupiah, roundingAmount, receiptItemLooksCorrupt, SCAN_ENGINE_VERSION } from '../lib/splitbill';
 import { readReceipt } from '../lib/receipt-ocr';
 import ReceiptPhotoEditor from './ReceiptPhotoEditor';
+import ReceiptScanReview from './ReceiptScanReview';
 
 type Props = { language: 'id' | 'en'; draft: SplitBill; onDraft: Dispatch<SetStateAction<SplitBill>>; history: SplitBill[]; onHistory: Dispatch<SetStateAction<SplitBill[]>>; flash: (s: string) => void };
 export default function SplitBillPanel({ language, draft: b, onDraft, history, onHistory, flash }: Props) {
@@ -18,7 +19,6 @@ export default function SplitBillPanel({ language, draft: b, onDraft, history, o
   const [photoFile, setPhotoFile] = useState<Blob | null>(null);
   const [lastPhoto, setLastPhoto] = useState<Blob | null>(null);
   const [pendingScan, setPendingScan] = useState<Awaited<ReturnType<typeof readReceipt>['promise']> | null>(null);
-  const [reviewScan, setReviewScan] = useState(false);
   const [cameraStarting, setCameraStarting] = useState(false);
   const [capturing, setCapturing] = useState(false);
   const [confidence, setConfidence] = useState<number | null>(null);
@@ -35,8 +35,14 @@ export default function SplitBillPanel({ language, draft: b, onDraft, history, o
   const cameraToken = useRef(0);
   const corruptScan = b.fromScan && b.items.some(receiptItemLooksCorrupt);
   const result = useMemo(() => calculateBill(b), [b]);
-  const patch = (data: Partial<SplitBill>) => { onDraft(current => ({ ...current, ...data })); setShareText(''); };
-  const updateItem = (id: string, data: Partial<BillItem>) => onDraft(current => ({ ...current, items: current.items.map(i => i.id === id ? { ...i, ...data } : i) }));
+  const patch = (data: Partial<SplitBill>) => {
+    onDraft(current => {
+      const itemChange = data.items && (data.items.length !== current.items.length || data.items.some((item, index) => { const old = current.items[index]; return !old || item.name !== old.name || item.amount !== old.amount || item.quantity !== old.quantity; }));
+      const receiptChange = itemChange || ['discount', 'service', 'tax', 'taxOnService', 'extra', 'rounding', 'expectedTotal'].some(key => key in data);
+      return { ...current, ...data, ...(current.fromScan && receiptChange ? { reviewed: false } : {}) };
+    }); setShareText('');
+  };
+  const updateItem = (id: string, data: Partial<BillItem>) => onDraft(current => ({ ...current, items: current.items.map(i => i.id === id ? { ...i, ...data } : i), ...(current.fromScan && ('name' in data || 'quantity' in data || 'amount' in data) ? { reviewed: false } : {}) }));
 
   useEffect(() => () => { scanToken.current++; cameraToken.current++; cancelRef.current?.(); streamRef.current?.getTracks().forEach(track => track.stop()); }, []);
   useEffect(() => { if (!preview) return; return () => URL.revokeObjectURL(preview); }, [preview]);
@@ -111,7 +117,7 @@ export default function SplitBillPanel({ language, draft: b, onDraft, history, o
   }
   async function scan(photo: Blob) {
     const token = ++scanToken.current;
-    setBusy(true); setProgress(0); setError(''); setScanNote(''); setConfidence(null); setRawText(''); setPendingScan(null); setReviewScan(false);
+    setBusy(true); setProgress(0); setError(''); setScanNote(''); setConfidence(null); setRawText(''); setPendingScan(null);
     setPreview(URL.createObjectURL(photo));
     let timeout: ReturnType<typeof setTimeout> | undefined;
     try {
@@ -121,7 +127,7 @@ export default function SplitBillPanel({ language, draft: b, onDraft, history, o
       const scanned = await job.promise;
       if (token !== scanToken.current) return;
       setRawText(scanned.text); setConfidence(scanned.confidence); setPendingScan(scanned);
-      setScanNote(scanned.assessment.usable ? t('Periksa hasil di bawah sebelum dimasukkan ke tagihan.', 'Check the results below before adding them to your bill.') : t('Foto belum terbaca dengan cukup baik. Ambil ulang atau isi manual. Tagihanmu belum diubah.', 'The photo is not clear enough. Retake or enter manually. Your bill has not changed.'));
+      setScanNote(scanned.receipt.currencyWarning ? t('Periksa mata uang pada foto. Tagihanmu belum diubah.', 'Check the currency on the photo. Your bill has not changed.') : scanned.assessment.usable ? t('Periksa dan koreksi hasil di bawah sebelum dimasukkan ke tagihan.', 'Check and correct the results below before adding them to your bill.') : t('Foto belum terbaca dengan cukup baik. Ambil ulang atau lengkapi hasil secara manual. Tagihanmu belum diubah.', 'The photo is not clear enough. Retake or complete the results manually. Your bill has not changed.'));
     } catch (e) {
       if (token === scanToken.current && (e as Error).message !== 'cancelled') setError(t('Scan gagal. Cek koneksi untuk memuat pemindai, lalu coba lagi atau isi manual.', 'Scan failed. Check your connection to load the scanner, then retry or enter manually.'));
     } finally {
@@ -129,13 +135,12 @@ export default function SplitBillPanel({ language, draft: b, onDraft, history, o
       if (token === scanToken.current) { setBusy(false); cancelRef.current = null; }
     }
   }
-  function useScan() {
-    if (!pendingScan?.assessment.usable || (pendingScan.assessment.issues.length > 0 && !reviewScan)) return;
+  function useScan(parsed: ParsedReceipt) {
+    if (!pendingScan || parsed.currencyWarning) return;
     if (b.items.length && !window.confirm(t('Ganti item dan biaya saat ini dengan hasil scan ini? Peserta tetap disimpan.', 'Replace the current items and charges with this scan? Participants will be kept.'))) return;
-    const parsed = pendingScan.receipt;
-    onDraft(current => ({ ...current, items: parsed.items, discount: { value: parsed.discount, mode: 'amount' }, service: { value: parsed.service, mode: 'amount' }, tax: { value: parsed.tax, mode: 'amount' }, extra: 0, rounding: parsed.rounding, taxOnService: false, expectedTotal: parsed.total, fromScan: true, reviewed: false, scanEngine: SCAN_ENGINE_VERSION, scannedAt: new Date().toISOString() }));
-    setPendingScan(null); setScanNote(t('Hasil dimasukkan. Koreksi nama, jumlah, dan nominal di form, lalu centang pemeriksaan struk.', 'Results added. Correct names, quantities and amounts in the form, then confirm your receipt review.'));
-    flash(t('Hasil scan masuk. Cek dan koreksi sebelum dibagi.', 'Scan added. Review and correct before splitting.'));
+    onDraft(current => ({ ...current, items: parsed.items, discount: { value: parsed.discount, mode: 'amount' }, service: { value: parsed.service, mode: 'amount' }, tax: { value: parsed.tax, mode: 'amount' }, extra: 0, rounding: parsed.rounding, taxOnService: false, expectedTotal: parsed.total, fromScan: true, reviewed: true, scanEngine: SCAN_ENGINE_VERSION, scannedAt: new Date().toISOString() }));
+    setPendingScan(null); setScanNote(t('Hasil yang sudah diperiksa masuk ke tagihan. Tambahkan peserta dan pilih pembagiannya.', 'Reviewed results added to the bill. Add participants and choose how to split it.'));
+    flash(t('Hasil yang sudah diperiksa masuk ke tagihan.', 'Reviewed scan added to the bill.'));
     document.getElementById('sb-items')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
   function cancelScan() { scanToken.current++; cancelRef.current?.(); cancelRef.current = null; setBusy(false); setError(t('Scan dibatalkan. Data sebelumnya tetap ada.', 'Scan cancelled. Previous entries are intact.')); }
@@ -202,17 +207,8 @@ export default function SplitBillPanel({ language, draft: b, onDraft, history, o
     {preview && <section className="sb-scan-review" aria-label={t('Pemeriksaan hasil scan', 'Scan result review')}>
       <div className="sb-card-head"><div><span className="eyebrow">{t('HASIL PEMBACAAN', 'SCAN RESULTS')}</span><h2>{pendingScan ? t('cek dulu, baru masuk.', 'review before adding.') : t('foto strukmu.', 'your receipt.')}</h2></div></div>
       <p>{scanNote || t('Foto sedang dibaca. Input sebelumnya tetap aman.', 'Reading the photo. Your existing entries are safe.')}</p>
-      {pendingScan && <>
-        {pendingScan.assessment.issues.length > 0 && <div className="sb-alert" role="status"><strong>{t('Hasil masih perlu diperiksa.', 'These results need checking.')}</strong> {t('Jangan gunakan nominal yang tidak cocok dengan foto.', 'Do not use amounts that do not match the photo.')}
-          {(pendingScan.assessment.issues.includes('total') || pendingScan.assessment.issues.includes('subtotal')) && <p>{t('Jumlah item dan biaya belum cocok dengan total struk.', 'Items and charges do not match the receipt total.')}</p>}
-          {pendingScan.assessment.issues.includes('noTotal') && <p>{t('Total struk belum ditemukan. Pastikan bagian bawah struk masuk foto.', 'Receipt total not found. Include the bottom of the receipt.')}</p>}
-        </div>}
-        {pendingScan.assessment.usable && pendingScan.receipt.items.length > 0 && <div className="sb-scan-table-wrap"><table className="sb-scan-table"><thead><tr><th>{t('Item terbaca', 'Detected item')}</th><th>{t('Jml', 'Qty')}</th><th>{t('Total baris', 'Line total')}</th></tr></thead><tbody>{pendingScan.receipt.items.map(item => <tr key={item.id}><td>{item.name}</td><td>{item.quantity}</td><td>{money(item.amount)}</td></tr>)}</tbody></table></div>}
-        {pendingScan.assessment.usable && <div className="sb-scan-amounts"><span>{t('Pajak', 'Tax')} <b>{money(pendingScan.receipt.tax)}</b></span><span>{t('Pembulatan', 'Rounding')} <b>{money(pendingScan.receipt.rounding)}</b></span><span>{t('Total struk', 'Receipt total')} <b>{pendingScan.receipt.total === null ? '—' : money(pendingScan.receipt.total)}</b></span></div>}
-        {pendingScan.assessment.usable && pendingScan.assessment.issues.length > 0 && <label className="sb-check"><input type="checkbox" checked={reviewScan} onChange={e => setReviewScan(e.target.checked)}/><span>{t('Saya akan mengoreksi hasil yang belum cocok di form.', 'I will correct the uncertain results in the form.')}</span></label>}
-        <div className="sb-photo-tools"><button className="primary-btn" type="button" disabled={!pendingScan.assessment.usable || (pendingScan.assessment.issues.length > 0 && !reviewScan)} onClick={useScan}>{t('MASUKKAN KE TAGIHAN', 'ADD TO BILL')}</button><button className="ghost-btn" type="button" onClick={openCamera}>{t('Foto ulang', 'Retake photo')}</button>{lastPhoto && <button className="ghost-btn" type="button" onClick={() => setPhotoFile(lastPhoto)}>{t('Atur area & baca ulang', 'Adjust area & rescan')}</button>}</div>
-      </>}
-      <details className="sb-scan-preview"><summary>{t('Lihat foto & teks mentah', 'View photo & raw text')}{confidence !== null && confidence < 70 ? t(' · kurang jelas', ' · low clarity') : ''}</summary><div><img src={preview} alt={t('Foto struk yang dipilih', 'Selected receipt photo')}/><section><pre>{rawText || t('Belum ada teks terbaca.', 'No text recognized yet.')}</pre></section></div></details>
+      {pendingScan && <ReceiptScanReview receipt={pendingScan.receipt} confidence={pendingScan.confidence} initiallyUsable={pendingScan.assessment.usable} photo={preview} language={language} onApply={useScan} onDiscard={() => { setPendingScan(null); setPreview(''); setRawText(''); setScanNote(''); setConfidence(null); setLastPhoto(null); }} onRetake={openCamera} onRecrop={lastPhoto ? () => setPhotoFile(lastPhoto) : undefined}/>}
+      <details className="sb-scan-preview"><summary>{pendingScan ? t('Lihat teks asli pemindai', 'View original scanner text') : t('Lihat foto & teks mentah', 'View photo & raw text')}{confidence !== null && confidence < 70 ? t(' · kurang jelas', ' · low clarity') : ''}</summary><div>{!pendingScan && <img src={preview} alt={t('Foto struk yang dipilih', 'Selected receipt photo')}/>}<section><pre>{rawText || t('Belum ada teks terbaca.', 'No text recognized yet.')}</pre></section></div></details>
     </section>}
     <fieldset className="sb-workspace" disabled={busy}><legend className="sb-sr-only">{t('Editor patungan', 'Split bill editor')}</legend><div className="sb-editor">
       <div className="sb-card"><div className="sb-card-head"><span className="sb-step">01</span><div><span className="eyebrow">{t('SIAPA AJA?', 'WHO IS IN?')}</span><h2>{t('mejanya rame berapa?', 'who is at the table?')}</h2></div></div>
